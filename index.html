@@ -2,6 +2,7 @@
 <html lang="pt-BR">
 <head>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Sistema Tom Gás</title>
@@ -143,12 +144,21 @@ table td:last-child{min-width:180px;}
 .searchbar{margin-bottom:12px;}
 .hint{font-size:12px;color:var(--text3);margin-top:4px;}
 .subtabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;}
+.checklist-nav{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+.checklist-lista{margin-top:12px;display:flex;flex-direction:column;gap:8px;}
+.checklist-item{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:10px 12px;border-radius:var(--radius);background:var(--blue-tint);}
+.checklist-item.feito{background:var(--green-tint);}
+.checklist-texto{font-size:14px;font-weight:500;}
+.checklist-meta{font-size:12px;color:var(--text2);}
+.check-ok{color:var(--green);font-weight:800;}
+.riscado{text-decoration:line-through;color:var(--text2);}
+.checklist-select-func{max-width:180px;}
+.checklist-acoes{display:flex;gap:4px;flex-wrap:wrap;}
 .item-venda-row{border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:8px;background:#F8FAFC;}
 .item-venda-row .form-row{align-items:end;}
 .cat-checklist{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px 16px;max-height:260px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:12px;}
 .checkbox-item{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:500;width:100%;}
 .checkbox-item input{width:auto;}
-#btn-sino-comunicados:hover{opacity:.8;}
 .comunicado-banner{background:linear-gradient(135deg,var(--royal) 0%,var(--royal-dark) 100%);color:#fff;border-radius:var(--radius);padding:16px 18px;margin-bottom:16px;position:relative;overflow:hidden;}
 .comunicado-banner img{width:100%;max-height:220px;object-fit:cover;border-radius:8px;margin-top:10px;}
 .comunicado-banner h3{margin:0 0 4px;font-size:15px;color:#fff;}
@@ -246,7 +256,6 @@ const AUTH_APP_HTML = `
     </div>
     <div style="display:flex;align-items:center;gap:16px;">
       <div id="logo-box"></div>
-      <button id="btn-sino-comunicados" title="Comunicados" style="background:none;border:none;color:#fff;font-size:19px;cursor:pointer;padding:0;position:relative;">🔔<span id="sino-badge" style="display:none;position:absolute;top:-4px;right:-6px;background:var(--danger);color:#fff;font-size:9px;font-weight:700;border-radius:10px;padding:1px 4px;line-height:1.2;"></span></button>
       <button id="btn-logout" class="link-btn" style="color:#fff;">Sair</button>
     </div>
     <input type="file" id="logo-file-input" accept="image/*" style="display:none;">
@@ -267,28 +276,36 @@ const NOTAS = ['Nota fiscal','Cupom não fiscal','Já lançado','Não lança'];
 const TIPOS_ENTREGA = ['Retirada','Entrega a pé','Entrega de carro','Entrega de moto','Entrega de Strada'];
 const TIPOS_ENTREGA_COM_FRETE = ['Entrega de carro','Entrega de moto','Entrega de Strada'];
 
+/* Hierarquia: Categoria (gas/agua/outros) > Tipo da Categoria (TIPOS_GAS/TIPOS_AGUA, ou as
+   entradas de CATEGORIAS_OUTRAS quando for "outros") > Produto (item final, ex: "Carga de Gás P13").
+   O Estoque (cheio/vazio) só existe para os Tipos de gas/agua — nunca para "outros". */
 const CATEGORIAS_ESTOQUE = {};
 const CATEGORIAS_CONTROLADAS = [];
+const TIPOS_GAS = [];
+const TIPOS_AGUA = [];
 ['P5','P13','P20','P45'].forEach(function(t){
   var carga = 'Carga de Gás ' + t;
   var vasilhame = 'Vasilhame de Gás ' + t;
-  CATEGORIAS_ESTOQUE[carga] = {grupo:'gas', chave:t, tipo:'carga'};
-  CATEGORIAS_ESTOQUE[vasilhame] = {grupo:'gas', chave:t, tipo:'vasilhame'};
+  CATEGORIAS_ESTOQUE[carga] = {grupo:'gas', chave:t, tipo:'carga', tipoLabel:t};
+  CATEGORIAS_ESTOQUE[vasilhame] = {grupo:'gas', chave:t, tipo:'vasilhame', tipoLabel:t};
   CATEGORIAS_CONTROLADAS.push(carga, vasilhame);
+  TIPOS_GAS.push(t);
 });
-[['dfonte',"Água D'Fonte"],['safira','Água Safira']].forEach(function(par){
-  var k = par[0], label = par[1];
+[['dfonte',"Água D'Fonte","D'Fonte"],['safira','Água Safira','Safira']].forEach(function(par){
+  var k = par[0], label = par[1], tipoLabel = par[2];
   var carga = 'Carga de ' + label + ' 20L';
   var vasilhame = 'Vasilhame de ' + label + ' 20L';
-  CATEGORIAS_ESTOQUE[carga] = {grupo:'agua', chave:k, tipo:'carga'};
-  CATEGORIAS_ESTOQUE[vasilhame] = {grupo:'agua', chave:k, tipo:'vasilhame'};
+  CATEGORIAS_ESTOQUE[carga] = {grupo:'agua', chave:k, tipo:'carga', tipoLabel:tipoLabel};
+  CATEGORIAS_ESTOQUE[vasilhame] = {grupo:'agua', chave:k, tipo:'vasilhame', tipoLabel:tipoLabel};
   CATEGORIAS_CONTROLADAS.push(carga, vasilhame);
+  TIPOS_AGUA.push(tipoLabel);
 });
-/* Gás do Povo é uma categoria própria (aparece separada nos relatórios), mas fisicamente
-   é uma carga de P13: vender nela desconta do mesmo estoque de P13 (cheio/vazio), sem
-   ganhar uma caixinha própria na tela de Estoque. */
-CATEGORIAS_ESTOQUE['Gás do Povo'] = {grupo:'gas', chave:'P13', tipo:'carga'};
+/* Gás do Povo é um Tipo próprio dentro de Gás (aparece separado nos relatórios), mas
+   compartilha fisicamente o mesmo estoque (chave) do Tipo P13: vender nele desconta do
+   mesmo saldo cheio/vazio de P13, sem ganhar uma caixinha própria na tela de Estoque. */
+CATEGORIAS_ESTOQUE['Gás do Povo'] = {grupo:'gas', chave:'P13', tipo:'carga', tipoLabel:'Gás do Povo'};
 CATEGORIAS_CONTROLADAS.push('Gás do Povo');
+TIPOS_GAS.push('Gás do Povo');
 const CATEGORIAS_OUTRAS = ['Acessórios para Gás','Acessórios para Água','Bandeja de Ovos','Bebidas','Caldos','Camisetas',
   'Carvão','Cosméticos','Dúzia de Ovos','Farofas','Impressões e Xérox','Nhoque','Ovos Soltos','Produtos de Limpeza',
   'Produtos de Mercearia','Serviços Fernando','Suplementos','Terra dos Ventos','Toalhas'];
@@ -320,6 +337,9 @@ let state = {
   agendamentos: [],
   metas: {},
   precosControlados: {},
+  checklistRotina: [],
+  checklistDias: {},
+  funcionarios: [],
   historicoMensal: [],
   logoUrl: null,
   faviconUrl: null,
@@ -330,28 +350,41 @@ let cadastroSub = 'clientes';
 let csvRows = null, csvHeaders = null;
 let csvProdRows = null, csvProdHeaders = null;
 let csvFiadoRows = null, csvFiadoHeaders = null;
+let csvVendasRows = null, csvVendasHeaders = null;
+let csvDespesasRows = null, csvDespesasHeaders = null;
 let editDespesaId = null, editClienteId = null, editVendaId = null, editFiadoId = null;
 let editEmpresaId = null, editAgendamentoId = null, pendingEditVendaId = null;
 let clienteExtrato = null, clienteRegistrandoPagamento = null, editFiadoPagamentoId = null;
 let agendamentoParaConcluir = null, prefillVenda = null;
 let editProdutoId = null, clienteCredito = null, editCreditoId = null, editEstoqueMovId = null;
-let editComunicadoId = null, telaAnteriorComunicados = 'dashboard';
+let editComunicadoId = null, telaAnteriorComunicados = 'config';
 let editCategoriaProdutoNome = null, editCategoriaDespesaNome = null;
 let editProdutoFixoId = null;
+let seletorVendaMain = null, seletorAgendamento = null;
 let dashCharts = {};
 let usuarioAtualNome = 'Usuário';
 
 const TABS = [
   {id:'dashboard', label:'Painel'},
-  {id:'metas', label:'Meta'},
   {id:'vendas', label:'Vendas'},
   {id:'despesas', label:'Despesas'},
   {id:'cadastros', label:'Cadastros'},
   {id:'estoque', label:'Estoque'},
   {id:'agendamentos', label:'Agendamentos'},
+  {id:'checklist', label:'Checklist Diário'},
   {id:'relatorios', label:'Relatórios'},
   {id:'config', label:'Configurações'},
 ];
+let checklistDataAtual = null;
+let editChecklistItemId = null;
+function localizarItemChecklist(id){
+  let idx = state.checklistRotina.findIndex(x=>x.id===id);
+  if(idx>-1) return {arr:state.checklistRotina, idx, tipo:'rotina', chave:'checklistRotina'};
+  const dia = diaChecklist(checklistDataAtual);
+  idx = dia.extras.findIndex(x=>x.id===id);
+  if(idx>-1) return {arr:dia.extras, idx, tipo:'dia', chave:'checklistDias'};
+  return null;
+}
 
 function fmtMoney(v){ return (v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'}); }
 function fmtDate(d){ const p=d.split('-'); return p[2]+'/'+p[1]+'/'+p[0]; }
@@ -412,17 +445,17 @@ function iconGota(cheio, cor, tamanho){
   return '<svg width="'+s+'" height="'+s+'" viewBox="0 0 24 24"><path d="M12 2.3C12 2.3 5 11.2 5 16a7 7 0 0 0 14 0c0-4.8-7-13.7-7-13.7z" fill="none" stroke="'+c+'" stroke-width="1.4"/></svg>';
 }
 function iconEntrega(tipo, cor, tamanho){
-  const c = cor || '#1E3A8A';
   const s = tamanho || 18;
-  const attrs = 'width="'+s+'" height="'+s+'" viewBox="0 0 24 24" fill="none" stroke="'+c+'" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"';
-  const icons = {
-    'Retirada': '<svg '+attrs+'><path d="M3 10l9-6 9 6"/><path d="M4.5 10.5v8a1 1 0 0 0 1 1h4.5v-6h4v6H19a1 1 0 0 0 1-1v-8"/></svg>',
-    'Entrega a pé': '<svg '+attrs+'><circle cx="13.5" cy="4.5" r="2"/><path d="M13 7l-1.5 5 3 2.5 1 6"/><path d="M11.5 12l-3.5 2 1 5.5"/><path d="M14.5 14.5l3 1 1.5 5"/></svg>',
-    'Entrega de carro': '<svg '+attrs+'><path d="M3.5 13l1.3-4.5A2 2 0 0 1 6.7 7h10.6a2 2 0 0 1 1.9 1.5L20.5 13"/><rect x="2.5" y="13" width="19" height="4.5" rx="1.4"/><circle cx="7" cy="18.5" r="1.6"/><circle cx="17" cy="18.5" r="1.6"/></svg>',
-    'Entrega de moto': '<svg '+attrs+'><circle cx="5.5" cy="17.5" r="2.4"/><circle cx="18" cy="17.5" r="2.4"/><path d="M5.5 17.5h5.5l2.5-6.5h4"/><path d="M12 11h3.5l2.2 3.2"/><path d="M15.5 8h3"/></svg>',
-    'Entrega de Strada': '<svg '+attrs+'><path d="M2.5 14h2.5V9.8H9l2 4.2"/><rect x="9" y="9.8" width="12.5" height="4.2" rx="1"/><path d="M2.5 14v2.7h1.8"/><path d="M21.5 14v2.7H20"/><circle cx="6.3" cy="17" r="2"/><circle cx="17.5" cy="17" r="2"/></svg>',
+  const imgs = {
+    'Retirada': 'iVBORw0KGgoAAAANSUhEUgAAABAAAAAPCAYAAADtc08vAAABDklEQVQokZ3Suy6EURQF4G/GpZHQKBRmJB5Ao6KRSOgUvIFGIvEElAoiUYln8ADiATRKCqJEJ2Eq9+uQE3uS35xJzFjJyT75s9ba+6z9l6qTWwJl7GAOyzjQBsoFSk+IK5htR5zQNVCZadw/8YI6NlDL2C1QnGAMq5jALnpzeo6iQRXDGMQ0NjN2CxQN3gv3GyxiJZf8RjdG0BengVpsZA1D2MuUP3hMazzBKNI+11GKIG9xHQ2a8/iKep4mmI/u1RA3CEu4jO2UWhikc58MruJjf9RDTEU+p9nQTSiGWI+6HeMvZOwWKBq84QNn2Md4pwbprU+4i/Be/2OQJniIf+K5U4PU+SiecoHjP9X4BvStN1F8z/edAAAAAElFTkSuQmCC',
+    'Entrega a pé': 'iVBORw0KGgoAAAANSUhEUgAAAAcAAAALCAYAAACzkJeoAAAAr0lEQVQYlU3OsUrCcRTF8Y8mIpT0Bv9FCFwLBHPqGZqCcGko0EWamoLCRRDMB7DBzRfoJRra2l3FKChFp7jw+4t3uXC+95xzC9n5AIp4whmusczFfGeo49CeGHOAP7xjvg+P8Yo7XKTYHbxBAx/YoId7lAOeYoxPrHCLI1RL6GCNJmq4wgO24fzBJVpoJ9iNznCeoI8JpqjgEW/hfEmxo/TkDL94DrhIl98JRs0QX//TjiBb0xJKNgAAAABJRU5ErkJggg==',
+    'Entrega de carro': 'iVBORw0KGgoAAAANSUhEUgAAAA8AAAAICAYAAAAm06XyAAAA3UlEQVQYlXXRrUvDcRAG8I/zBQw6DLKk3WAXg00Em2UMRcsEBZP/hMEiJl9gZYio3WITk2VYVg06sawYxCDCODhh/Nge+Ia7+z7P3XM3Mr98LLGOXfxhAZ/o4gvneFFAKcMjNHCJGh5xhW1cIzpUi+TR8tzqGi5wiltMYwkVtPCBtxQr4xudIMfY9znyD35TdCKEMyetzPQ1bWJ/DIuZmMzXj/HiqIkdvIfnqUxs4WDI539EfTODjei8h5Pc5ixe8TSAuIJ2XiA8Hwb5Ls9xk95C+XkAOZZ4lruo46EHc4Qr2Wtma6YAAAAASUVORK5CYII=',
+    'Entrega de moto': 'iVBORw0KGgoAAAANSUhEUgAAABAAAAANCAYAAACgu+4kAAABUElEQVQokZXSMUiVYRTG8Z8aoQ5p6mBBhYK4iYM5XA0c2gprEzEuCYng4KSDS2A6NTjp4iKOJmgUoqBYGYFItEcQFLWUIiIKQaK8t4Mp18AOfHzf+3De/3nOw1dwPfPUP+oSpnEZXfh+VtuFPOVvleF+nBr/F1CELNYxj9d5HVGFecqfuofRmJwAe6G3nAeQXA3F9w5eog8PsBS5nAKU4Aau4UoE1oT3aMA39OImvsQ7exJQiw18xcewv48KdOIxpvAL9dg8EW7Obh0+YRAjaMYKDjCGt3GxOrSf0XvsoBSTuBOBXUQ7isP+IapiyBO04lnASxPgFYaxhQmsBXw30v8dTldjSDneoQ3jCXAXBZF0N24FoAafcTvOP2KFhwHvQUcip50qcTXcJLsJmJ6kP48c0tT+cLiAR9hOgEW8wBzeIBMrzZ7xzyxjBh9yzhk4AgxjR80D8QofAAAAAElFTkSuQmCC',
+    'Entrega de Strada': 'iVBORw0KGgoAAAANSUhEUgAAAA8AAAAHCAYAAADXhRcnAAAAxElEQVQYlW3QIU+CYRQF4AfFTTcsjOaG3cEYxQAzaGZkk0ESP8GOhWywWdgIJIgkOhSDREfF5MZEgwp7t5ft2zdOurs7595zTqZY60rhDmV8ooQ5luhjlaQepJU4xBMeMUMH73hAIUnMood84tAZ7vGNc1zHuYIGRhhiGmyvcbLHwT784Bj/aIXPGbxhEOcbXKWUX3jGH07RDnGCOJQwxiJeDrsqjhLiCT6CVdTxust8iRya2MRML7G4HcKDW1zE5hv43QKS8CeKzldLEQAAAABJRU5ErkJggg==',
   };
-  return icons[tipo] || '<svg '+attrs+'><circle cx="12" cy="12" r="8.5"/></svg>';
+  const b64 = imgs[tipo];
+  if(!b64) return '<svg width="'+s+'" height="'+s+'" viewBox="0 0 24 24" fill="none" stroke="'+(cor||'#1E3A8A')+'" stroke-width="1.8"><circle cx="12" cy="12" r="8.5"/></svg>';
+  return '<img src="data:image/png;base64,'+b64+'" width="'+s+'" style="vertical-align:middle;image-rendering:-webkit-optimize-contrast;" alt="'+tipo+'">';
 }
 function entregaLabel(tipo, hora){
   if(!tipo) return '—';
@@ -431,41 +464,31 @@ function entregaLabel(tipo, hora){
 function novoItemVendaRow(){
   const div = document.createElement('div');
   div.className = 'item-venda-row iv-extra-row';
-  const selId = 'sel-produto-extra-'+uid();
-  const manualId = 'manual-extra-'+uid();
+  const uidBase = uid();
+  const selId = 'sel-produto-extra-'+uidBase;
+  const manualId = 'manual-extra-'+uidBase;
+  const grupoId = 'sel-grupo-extra-'+uidBase;
+  const etiquetaWrapId = 'wrap-etiqueta-extra-'+uidBase;
+  const etiquetaId = 'sel-etiqueta-extra-'+uidBase;
+  const catHiddenId = 'sel-categoria-extra-'+uidBase;
+  const produtoWrapId = 'wrap-produto-extra-'+uidBase;
   div.innerHTML = '<div class="form-row">'+
-    '<div><label>Categoria</label><select class="iv-categoria">'+categoriaOptions()+'</select></div>'+
-    '<div class="iv-produto-livre-wrap" style="display:none;"><label>Produto</label><select class="iv-produto-select" id="'+selId+'"></select>'+
+    htmlSeletorCategoria({categoriaHiddenId:catHiddenId, grupoId:grupoId, etiquetaWrapId:etiquetaWrapId, etiquetaId:etiquetaId, required:false})+
+    '<div class="iv-produto-livre-wrap" id="'+produtoWrapId+'" style="display:none;"><label>Produto</label><select class="iv-produto-select" id="'+selId+'"></select>'+
     '<div id="'+manualId+'" style="display:none;margin-top:8px;"><label>Nome do produto (digite)</label><input type="text" class="iv-produto-livre" placeholder="Nome do item"></div></div>'+
     '<div><label>Quantidade</label><input type="number" class="iv-quantidade" min="1" value="1" step="1"></div>'+
     '<div><label>Valor unitário (R$)</label><input type="number" class="iv-valor-unit" min="0" step="0.01" placeholder="0,00"></div>'+
     '<div style="align-self:end;"><button type="button" class="del-link iv-remove">remover item</button></div>'+
     '</div>';
-  const catSel = div.querySelector('.iv-categoria');
-  const wrapLivre = div.querySelector('.iv-produto-livre-wrap');
-  const produtoSelect = div.querySelector('.iv-produto-select');
+  const catHiddenEl = div.querySelector('#'+catHiddenId);
+  if(catHiddenEl) catHiddenEl.classList.add('iv-categoria');
   const produtoLivreInput = div.querySelector('.iv-produto-livre');
-  const manualWrap = div.querySelector('#'+manualId);
   const valorUnitInput = div.querySelector('.iv-valor-unit');
-  const produtoSelectHandler = ()=>{
-    if(produtoSelect.value==='__outro__'){
-      manualWrap.style.display = 'block';
-      produtoLivreInput.value = ''; produtoLivreInput.focus();
-    } else {
-      manualWrap.style.display = 'none';
-      produtoLivreInput.value = produtoSelect.value;
-      const opt = produtoSelect.selectedOptions[0];
-      if(opt && opt.dataset.preco) valorUnitInput.value = Number(opt.dataset.preco).toFixed(2);
-    }
-  };
-  produtoSelect.onchange = produtoSelectHandler;
-  catSel.onchange = ()=>{
-    wrapLivre.style.display = 'block';
-    const unico = popularSelectProdutoCatalogo(selId, catSel.value);
-    manualWrap.style.display = 'none';
-    if(unico) produtoSelectHandler();
-  };
-  catSel.dispatchEvent(new Event('change'));
+  wireSeletorCategoria({
+    grupoId:grupoId, etiquetaWrapId:etiquetaWrapId, etiquetaId:etiquetaId,
+    produtoWrapId:produtoWrapId, produtoId:selId, categoriaHiddenId:catHiddenId, manualWrapId:manualId,
+    produtoLivreEl:produtoLivreInput, valorUnitEl:valorUnitInput
+  });
   div.querySelector('.iv-remove').onclick = ()=>{ div.remove(); atualizarTotalCarrinho(); };
   div.querySelectorAll('.iv-quantidade,.iv-valor-unit').forEach(inp=>inp.oninput = atualizarTotalCarrinho);
   return div;
@@ -479,6 +502,121 @@ function tentarAutoPreencherPreco(categoria, nomeDigitado, inputValorUnit){
   if(!inputValorUnit || !nomeDigitado) return;
   const match = produtosDaCategoria(categoria).find(p=>p.nome.toLowerCase()===nomeDigitado.trim().toLowerCase());
   if(match) inputValorUnit.value = Number(match.preco).toFixed(2);
+}
+function grupoDaCategoria(categoria){
+  const info = CATEGORIAS_ESTOQUE[categoria];
+  if(info) return info.grupo==='gas' ? 'gas' : 'agua';
+  return categoria ? 'outros' : '';
+}
+function produtosFixosDoGrupo(grupo){
+  return state.produtos.filter(p=>p.fixo && CATEGORIAS_ESTOQUE[p.categoria] && CATEGORIAS_ESTOQUE[p.categoria].grupo===grupo)
+    .sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR'));
+}
+/* Tipos selecionáveis dentro de cada Categoria — gas/agua usam TIPOS_GAS/TIPOS_AGUA
+   (nível fixo, ligado ao estoque); "outros" usa as categorias de produto não controladas. */
+function tiposDoGrupo(grupo){
+  if(grupo==='gas') return TIPOS_GAS;
+  if(grupo==='agua') return TIPOS_AGUA;
+  if(grupo==='outros') return categoriasNaoControladas();
+  return [];
+}
+function produtosFixosDoTipo(grupo, tipoLabel){
+  return state.produtos.filter(p=>p.fixo && CATEGORIAS_ESTOQUE[p.categoria] && CATEGORIAS_ESTOQUE[p.categoria].grupo===grupo && CATEGORIAS_ESTOQUE[p.categoria].tipoLabel===tipoLabel)
+    .sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR'));
+}
+function popularSelectProdutoFixoTipo(selectId, grupo, tipoLabel){
+  const sel = document.getElementById(selectId);
+  if(!sel) return null;
+  const produtos = produtosFixosDoTipo(grupo, tipoLabel);
+  sel.innerHTML = '<option value="" selected disabled>Selecione o produto</option>'+
+    produtos.map(p=>'<option value="'+p.nome+'" data-preco="'+p.preco+'">'+p.nome+' — '+fmtMoney(p.preco)+'</option>').join('');
+  if(produtos.length===1){ sel.value = produtos[0].nome; return produtos[0]; }
+  return null;
+}
+function htmlSeletorCategoria(p){
+  return '<input type="hidden" id="'+p.categoriaHiddenId+'" name="categoria"'+(p.required?' required':'')+'>'+
+    '<div><label>Categoria'+(p.required?' <span class="req">*</span>':'')+'</label><select id="'+p.grupoId+'">'+
+    '<option value="" selected disabled>Selecione</option><option value="gas">Gás</option><option value="agua">Água</option><option value="outros">Outros</option>'+
+    '</select></div>'+
+    '<div id="'+p.etiquetaWrapId+'" style="display:none;"><label>Tipo da Categoria'+(p.required?' <span class="req">*</span>':'')+'</label><select id="'+p.etiquetaId+'">'+
+    opcoesComPlaceholder(categoriasNaoControladas(),'Selecione o tipo')+'</select></div>';
+}
+function wireSeletorCategoria(cfg){
+  const grupoEl = document.getElementById(cfg.grupoId);
+  const etiquetaWrapEl = document.getElementById(cfg.etiquetaWrapId);
+  const etiquetaEl = document.getElementById(cfg.etiquetaId);
+  const produtoWrapEl = document.getElementById(cfg.produtoWrapId);
+  const produtoEl = document.getElementById(cfg.produtoId);
+  const categoriaHiddenEl = document.getElementById(cfg.categoriaHiddenId);
+  const manualWrapEl = cfg.manualWrapId ? document.getElementById(cfg.manualWrapId) : null;
+  if(!grupoEl || !produtoEl || !categoriaHiddenEl) return null;
+
+  const handleProdutoChange = ()=>{
+    if(produtoEl.value==='__outro__'){
+      if(manualWrapEl) manualWrapEl.style.display = 'block';
+      categoriaHiddenEl.value = etiquetaEl ? etiquetaEl.value : '';
+      if(cfg.produtoLivreEl){ cfg.produtoLivreEl.value=''; cfg.produtoLivreEl.focus(); }
+      return;
+    }
+    if(manualWrapEl) manualWrapEl.style.display = 'none';
+    const opt = produtoEl.selectedOptions[0];
+    if(grupoEl.value==='outros'){
+      categoriaHiddenEl.value = etiquetaEl ? etiquetaEl.value : '';
+    } else {
+      categoriaHiddenEl.value = produtoEl.value;
+    }
+    if(cfg.produtoLivreEl) cfg.produtoLivreEl.value = produtoEl.value;
+    if(opt && opt.dataset.preco && cfg.valorUnitEl) cfg.valorUnitEl.value = Number(opt.dataset.preco).toFixed(2);
+    if(cfg.onProdutoChange) cfg.onProdutoChange(opt);
+  };
+  produtoEl.onchange = handleProdutoChange;
+
+  const atualizarEtiqueta = (produtoPreSelecionado)=>{
+    if(!etiquetaEl) return;
+    const grupo = grupoEl.value;
+    const unico = grupo==='outros'
+      ? popularSelectProdutoCatalogo(cfg.produtoId, etiquetaEl.value)
+      : popularSelectProdutoFixoTipo(cfg.produtoId, grupo, etiquetaEl.value);
+    if(produtoWrapEl) produtoWrapEl.style.display = 'block';
+    if(manualWrapEl) manualWrapEl.style.display = 'none';
+    if(produtoPreSelecionado){ produtoEl.value = produtoPreSelecionado; handleProdutoChange(); }
+    else if(unico) handleProdutoChange();
+  };
+  if(etiquetaEl) etiquetaEl.onchange = ()=>atualizarEtiqueta();
+
+  const atualizarGrupo = (etiquetaPre, produtoPre)=>{
+    categoriaHiddenEl.value = '';
+    if(grupoEl.value==='gas' || grupoEl.value==='agua' || grupoEl.value==='outros'){
+      if(etiquetaWrapEl) etiquetaWrapEl.style.display = 'block';
+      if(produtoWrapEl) produtoWrapEl.style.display = etiquetaPre ? 'block' : 'none';
+      if(manualWrapEl) manualWrapEl.style.display = 'none';
+      if(etiquetaEl){
+        etiquetaEl.innerHTML = opcoesComPlaceholder(tiposDoGrupo(grupoEl.value),'Selecione o tipo');
+        etiquetaEl.value = etiquetaPre || '';
+      }
+      if(etiquetaPre) atualizarEtiqueta(produtoPre);
+      else if(produtoEl) produtoEl.innerHTML = '<option value="" selected disabled>Selecione o tipo primeiro</option>';
+    } else {
+      if(etiquetaWrapEl) etiquetaWrapEl.style.display = 'none';
+      if(produtoWrapEl) produtoWrapEl.style.display = 'none';
+    }
+  };
+  grupoEl.onchange = ()=>atualizarGrupo();
+
+  return {
+    atualizarGrupo,
+    setValor(categoria, produtoNome){
+      const grupo = grupoDaCategoria(categoria);
+      if(!grupo) return;
+      grupoEl.value = grupo;
+      if(grupo==='outros'){
+        atualizarGrupo(categoria, produtoNome||'__outro__');
+      } else {
+        const info = CATEGORIAS_ESTOQUE[categoria];
+        atualizarGrupo(info ? info.tipoLabel : '', produtoNome||categoria);
+      }
+    }
+  };
 }
 function popularSelectProdutoCatalogo(selectId, categoria){
   const sel = document.getElementById(selectId);
@@ -568,16 +706,6 @@ function toggleDetalhesEntregaVenda(){
     atualizarTotalCarrinho();
   }
 }
-function toggleProdutoAgendamento(){
-  const sel = document.getElementById('sel-categoria-ag');
-  const wrap = document.getElementById('wrap-produto-ag');
-  if(!sel || !wrap) return null;
-  wrap.style.display = 'block';
-  const unico = popularSelectProdutoCatalogo('sel-produto-catalogo-ag', sel.value);
-  const manualWrap = document.getElementById('wrap-produto-manual-ag');
-  if(manualWrap) manualWrap.style.display = 'none';
-  return unico;
-}
 function toggleAvisoRetroativoAgendamento(){
   const dataEl = document.getElementById('ag-data-input');
   const aviso = document.getElementById('ag-aviso-retroativo');
@@ -621,7 +749,7 @@ function enviarWhatsAppEntregador(dados){
   window.open(url, '_blank');
 }
 
-const APP_DATA_KEYS = ['vendas','despesas','clientes','empresas','produtos','estoque','estoqueLancamentos','categoriasProdutos','categoriasDespesas','fiados','fiadoPagamentos','creditos','agendamentos','metas','comunicados','precosControlados','historicoMensal','logoUrl','faviconUrl'];
+const APP_DATA_KEYS = ['vendas','despesas','clientes','empresas','produtos','estoque','estoqueLancamentos','categoriasProdutos','categoriasDespesas','fiados','fiadoPagamentos','creditos','agendamentos','metas','comunicados','precosControlados','historicoMensal','checklistRotina','checklistDias','funcionarios','logoUrl','faviconUrl'];
 async function loadAll(){
   try{
     const { data, error } = await supabaseClient.from('app_data').select('chave,valor').in('chave', APP_DATA_KEYS);
@@ -634,6 +762,32 @@ async function loadAll(){
   if(!state.fiadoPagamentos) state.fiadoPagamentos = [];
   if(!state.produtos) state.produtos = [];
   if(!state.precosControlados) state.precosControlados = {};
+  if(!state.checklistRotina) state.checklistRotina = [];
+  if(!state.checklistDias) state.checklistDias = {};
+  if(!state.funcionarios) state.funcionarios = [];
+  if(state.checklistRotina.length===0){
+    const itensPadrao = [
+      'Fazer pedido de água','Fazer pedido de carvão','Fazer pedido de gás','Fazer pedido de produtos de limpeza',
+      'Conferir estoque de acessórios de água e gás',
+      'Tirar relatório de vendas para lançar no Bling (nota fiscal e cupom não fiscal) — 19:30',
+      'Trocar o gelo do cooler','Ver se tem água no filtro',
+      'Dar uma geral nos produtos que devem ser pedidos de mercearia',
+      'Colocar placas e wind banner pra fora','Postagens no Instagram (feed e stories)',
+      'Postagem no Google Empresas','Postagem no WhatsApp',
+      'Conferir trocos para o depósito e para o entregador',
+      'Fazer o backup do sistema no final do dia antes de sair',
+      'Enviar mensagens para clientes que estão com o gás acabando',
+      'Enviar mensagens para possíveis clientes','Limpeza do depósito',
+      'Conferir os agendamentos do dia anterior','Combustível dos veículos',
+      'Manutenção — ver se precisa fazer algo nos veículos'
+    ];
+    state.checklistRotina = itensPadrao.map(texto=>({id:uid(), texto}));
+    await save('checklistRotina');
+  }
+  if(state.funcionarios.length===0){
+    state.funcionarios = ['Fernando','Suh'];
+    await save('funcionarios');
+  }
   if(!state.historicoMensal) state.historicoMensal = [];
   if(!state.estoqueLancamentos) state.estoqueLancamentos = [];
   if(!state.creditos) state.creditos = [];
@@ -822,10 +976,7 @@ function renderNav(){
   const nav = document.getElementById('nav');
   let html = '';
   TABS.forEach((t,i)=>{
-    if(i>0){
-      const extraMargin = (TABS[i-1].id==='agendamentos' && t.id==='relatorios') ? ' style="margin:0 22px;"' : '';
-      html += '<span class="nav-sep"'+extraMargin+'>|</span>';
-    }
+    if(i>0) html += '<span class="nav-sep">|</span>';
     html += '<button data-tab="'+t.id+'" class="'+(currentTab===t.id?'active':'')+'">'+t.label+'</button>';
   });
   nav.innerHTML = html;
@@ -886,6 +1037,7 @@ function renderAll(){
   if(currentTab==='cadastros') main.innerHTML = viewCadastros();
   if(currentTab==='estoque') main.innerHTML = viewEstoque();
   if(currentTab==='agendamentos') main.innerHTML = viewAgendamentos();
+  if(currentTab==='checklist') main.innerHTML = viewChecklist();
   if(currentTab==='relatorios') main.innerHTML = viewRelatorios();
   if(currentTab==='config') main.innerHTML = viewConfig();
   attachHandlers();
@@ -949,8 +1101,8 @@ function metaCardDashboardHtml(){
   const vendidoHoje = p13VendidosNoDia(hoje);
   const vendidoMes = p13VendidosNoMes(mk);
   return '<div class="meta-card"><h2>🎯 Meta de cargas de P13 — '+nomeMes(mk)+'</h2>'+
-    barraMetaHtml(vendidoHoje, metaDiaria, 'Meta de hoje')+
-    barraMetaHtml(vendidoMes, metaMensal, 'Meta do mês')+
+    barraMetaHtml(vendidoHoje, metaDiaria, 'Meta de hoje ('+fmtDate(hoje)+')')+
+    barraMetaHtml(vendidoMes, metaMensal, 'Meta do mês ('+nomeMes(mk)+')')+
     '</div>';
 }
 function viewMetas(){
@@ -967,7 +1119,8 @@ function viewMetas(){
   }).join('');
   const tabela = meses.length===0 ? '<div class="empty">Nenhuma meta configurada ainda.</div>' :
     '<div class="table-wrap"><table><thead><tr><th>Mês</th><th>Meta mensal</th><th>Meta diária</th><th>Vendido no mês</th><th></th></tr></thead><tbody>'+linhas+'</tbody></table></div>';
-  return '<div class="card"><h2>Meta de cargas de P13</h2>'+
+  return '<button type="button" class="link-btn" id="btn-voltar-metas" style="margin-bottom:10px;">← voltar</button>'+
+    '<div class="card"><h2>Meta de cargas de P13</h2>'+
     '<div class="hint">Defina quantas cargas de P13 vocês querem vender por mês. O sistema divide automaticamente pelo número de dias do mês (todo mês tem dias diferentes) pra calcular a meta diária, e mostra a evolução na página Painel.</div>'+
     '<form id="form-meta" style="margin-top:12px;">'+
     '<div class="form-row" style="max-width:420px;">'+
@@ -979,8 +1132,8 @@ function viewMetas(){
     (metaMensalAtual>0 ? '<div class="hint" style="margin-top:10px;">Meta de '+nomeMes(mk)+': <strong>'+arred1(metaMensalAtual)+' cargas</strong> em '+dias+' dias = <strong>'+arred1(metaMensalAtual/dias)+' cargas por dia</strong>.</div>' : '')+
     '</div>'+
     '<div class="card"><h2>Meta atual</h2>'+
-    barraMetaHtml(p13VendidosNoDia(todayStr()), metaDiariaP13(mk), 'Meta de hoje')+
-    barraMetaHtml(p13VendidosNoMes(mk), metaMensalAtual, 'Meta do mês')+
+    barraMetaHtml(p13VendidosNoDia(todayStr()), metaDiariaP13(mk), 'Meta de hoje ('+fmtDate(todayStr())+')')+
+    barraMetaHtml(p13VendidosNoMes(mk), metaMensalAtual, 'Meta do mês ('+nomeMes(mk)+')')+
     '</div>'+
     '<div class="card"><h2>Histórico de metas</h2>'+tabela+'</div>';
 }
@@ -1182,10 +1335,6 @@ function ajustaEstoquePorVenda(categoria, qtd, reverter){
 function opcoesComPlaceholder(lista, texto){
   return '<option value="" selected disabled>'+texto+'</option>'+lista.map(x=>'<option>'+x+'</option>').join('');
 }
-function categoriaOptions(){
-  const ordenadas = state.categoriasProdutos.slice().sort((a,b)=>a.localeCompare(b,'pt-BR'));
-  return '<option value="" selected disabled>Selecione a categoria/produto</option>'+ordenadas.map(c=>'<option value="'+c+'">'+c+'</option>').join('');
-}
 function empresasOptions(){
   const set = {};
   state.empresas.forEach(e=>{ if(e.nome) set[e.nome]=true; });
@@ -1338,11 +1487,8 @@ function viewGerenciarCategorias(){
     return '<tr><td>'+cat+'</td><td>'+qtd+' produto(s)</td>'+
       '<td><button class="act-link" data-edit-cat-produto="'+cat+'">✎ editar</button><button class="del-link" data-del-cat-produto="'+cat+'">🗑 excluir</button></td></tr>';
   }).join('');
-  const linhasControladas = CATEGORIAS_CONTROLADAS.map(function(cat){
-    return '<tr><td>'+cat+'</td><td colspan="2"><span class="hint">categoria fixa de gás/água — edite o preço na aba Produtos</span></td></tr>';
-  }).join('');
-  const tabelaProd = catsProd.length===0 && CATEGORIAS_CONTROLADAS.length===0 ? '<div class="empty">Nenhuma categoria de produto cadastrada ainda.</div>' :
-    '<div class="table-wrap"><table><thead><tr><th>Categoria</th><th>Produtos</th><th></th></tr></thead><tbody>'+linhasProd+linhasControladas+'</tbody></table></div>';
+  const tabelaProd = catsProd.length===0 ? '<div class="empty">Nenhum tipo de categoria cadastrado ainda.</div>' :
+    '<div class="table-wrap"><table><thead><tr><th>Tipo</th><th>Produtos</th><th></th></tr></thead><tbody>'+linhasProd+'</tbody></table></div>';
 
   const catsDesp = state.categoriasDespesas;
   const linhasDesp = catsDesp.map(function(cat){
@@ -1357,11 +1503,11 @@ function viewGerenciarCategorias(){
   const tabelaDesp = catsDesp.length===0 ? '<div class="empty">Nenhuma categoria de despesa cadastrada ainda.</div>' :
     '<div class="table-wrap"><table><thead><tr><th>Categoria</th><th>Despesas</th><th></th></tr></thead><tbody>'+linhasDesp+'</tbody></table></div>';
 
-  return '<div class="card"><h2>Categorias de produtos</h2>'+
-    '<div class="hint">Editar o nome atualiza automaticamente os produtos, vendas e agendamentos que já usam essa categoria. As categorias fixas de gás e água têm nome fixo e não podem ser excluídas — pra mudar o preço delas, vá na aba Produtos.</div>'+
+  return '<div class="card"><h2>Tipos de Categoria (Outros / Bling)</h2>'+
+    '<div class="hint">São os tipos usados dentro da Categoria "Outros" (o que o Bling chama de categoria). Editar o nome atualiza automaticamente os produtos, vendas e agendamentos que já usam esse tipo. Os itens de gás e água ficam numa aba própria — vá em Categorias Fixas pra mudar o preço deles.</div>'+
     tabelaProd+
-    '<h3 style="margin-top:16px;">Adicionar categoria de produto</h3>'+
-    '<div class="inline-add"><input type="text" id="nova-cat-produto-config-input" placeholder="Nome da nova categoria">'+
+    '<h3 style="margin-top:16px;">Adicionar tipo de categoria</h3>'+
+    '<div class="inline-add"><input type="text" id="nova-cat-produto-config-input" placeholder="Nome do novo tipo">'+
     '<button type="button" class="btn small ghost" id="btn-add-cat-produto-config">Adicionar</button></div>'+
     '</div>'+
     '<div class="card"><h2>Categorias de despesas</h2>'+
@@ -1377,8 +1523,7 @@ function viewProdutos(){
   const cats = categoriasNaoControladas();
   const busca = '<input type="text" id="busca-produto" class="searchbar" placeholder="Buscar produto por nome...">';
   const catalogoHtml = '<div id="catalogo-produtos-wrap">'+catalogoProdutosHtml(cats)+'</div>';
-  return catalogoControladosHtml()+
-    '<div class="card"><h2>Catálogo de produtos <span class="pill">'+state.produtos.filter(p=>!p.fixo).length+'</span></h2>'+
+  return '<div class="card"><h2>Catálogo de produtos <span class="pill">'+state.produtos.filter(p=>!p.fixo).length+'</span></h2>'+
     '<div class="hint">Produtos organizados por categoria, com preço padrão. Na hora da venda, o preço já vem preenchido, mas você pode mudar se quiser.</div>'+
     busca + catalogoHtml + '</div>'+
     '<div class="card"><h2>Novo produto</h2><form id="form-produto">'+
@@ -1392,19 +1537,27 @@ function viewProdutos(){
     '<div class="hint">Exporte o catálogo de produtos do Bling em CSV e importe aqui — nome, preço e categoria já vêm preenchidos automaticamente. Produtos já cadastrados (mesmo nome na mesma categoria) não são duplicados.</div>'+
     '<input type="file" id="csv-prod-input" accept=".csv,.txt,.tsv,.xlsx,.xls" style="margin-top:10px;"><div id="csv-prod-mapping"></div></div>';
 }
-function catalogoControladosHtml(){
-  const fixos = CATEGORIAS_CONTROLADAS.map(cat=>state.produtos.find(p=>p.categoria===cat && p.fixo)).filter(Boolean);
-  const linhas = fixos.map(function(p){
+function viewCategoriasFixas(){
+  const linhaFixo = function(p){
     if(editProdutoFixoId===p.id){
       return '<tr><td>'+p.nome+'</td><td><input type="number" id="input-edit-preco-fixo" min="0" step="0.01" value="'+Number(p.preco).toFixed(2)+'"></td>'+
         '<td><button class="act-link" data-save-preco-fixo="'+p.id+'">✓ salvar</button><button class="del-link" data-cancel-preco-fixo="'+p.id+'">cancelar</button></td></tr>';
     }
     return '<tr><td>'+p.nome+'</td><td>'+fmtMoney(p.preco)+'</td>'+
       '<td><button class="act-link" data-edit-preco-fixo="'+p.id+'">✎ editar preço</button></td></tr>';
-  }).join('');
-  return '<div class="card"><h2>Gás e água <span class="pill">'+fixos.length+'</span></h2>'+
-    '<div class="hint">Cargas e vasilhames de gás e água, ligados direto ao controle de estoque. Você pode alterar o preço de cada um à vontade — nome e categoria são fixos e não podem ser excluídos, porque mexem na estrutura do depósito.</div>'+
-    '<div class="table-wrap" style="margin-top:8px;"><table><thead><tr><th>Item</th><th>Preço</th><th></th></tr></thead><tbody>'+linhas+'</tbody></table></div>'+
+  };
+  const fixosGas = produtosFixosDoGrupo('gas');
+  const fixosAgua = produtosFixosDoGrupo('agua');
+  const tabela = function(lista){
+    return '<div class="table-wrap" style="margin-top:8px;"><table><thead><tr><th>Item</th><th>Preço</th><th></th></tr></thead><tbody>'+lista.map(linhaFixo).join('')+'</tbody></table></div>';
+  };
+  return '<div class="card"><h2>Categoria: Gás <span class="pill">'+fixosGas.length+'</span></h2>'+
+    '<div class="hint">Cargas e vasilhames de gás (P5, P13, P20, P45) e Gás do Povo — ligados direto ao controle de estoque. Você pode alterar o preço de cada um à vontade — nome e categoria são fixos e <strong>não podem ser excluídos</strong>, porque mexem na estrutura do depósito. Ao importar do Bling, esses itens ficam de fora por padrão, pra nunca duplicar.</div>'+
+    tabela(fixosGas)+
+    '</div>'+
+    '<div class="card"><h2>Categoria: Água <span class="pill">'+fixosAgua.length+'</span></h2>'+
+    '<div class="hint">Cargas e vasilhames de água (D\'Fonte e Safira) — mesma lógica do gás: preço editável, sem exclusão.</div>'+
+    tabela(fixosAgua)+
     '</div>';
 }
 function catalogoProdutosHtml(cats){
@@ -1477,15 +1630,15 @@ function viewVendas(){
     '<h3 style="margin-top:16px;">Itens da venda</h3>'+
     '<div class="item-venda-row">'+
     '<div class="form-row">'+
-    '<div><label>Categoria <span class="req">*</span></label><select id="sel-categoria" name="categoria">'+categoriaOptions()+'</select></div>'+
+    htmlSeletorCategoria({categoriaHiddenId:'sel-categoria', grupoId:'sel-grupo', etiquetaWrapId:'wrap-etiqueta', etiquetaId:'sel-etiqueta', required:true})+
     '<div id="wrap-produto" style="display:none;"><label>Produto <span class="req">*</span></label><select id="sel-produto-catalogo"></select>'+
     '<div id="wrap-produto-manual" style="display:none;margin-top:8px;"><label>Nome do produto (digite) <span class="req">*</span></label><input type="text" name="produto_livre" placeholder="Nome do item"></div></div>'+
     '<div><label>Quantidade <span class="req">*</span></label><input type="number" name="quantidade" min="1" value="1" step="1" required></div>'+
     '<div><label>Valor unitário (R$) <span class="req">*</span></label><input type="number" name="valor_unit" min="0" step="0.01" placeholder="0,00" required></div>'+
     '</div>'+
-    '<button type="button" class="link-btn" id="btn-nova-cat-produto" style="margin-top:8px;">+ nova categoria de produto</button>'+
+    '<button type="button" class="link-btn" id="btn-nova-cat-produto" style="margin-top:8px;">+ novo tipo de categoria (Outros)</button>'+
     '<div id="nova-cat-produto-wrap" style="display:none;"><div class="inline-add">'+
-    '<input type="text" id="nova-cat-produto-input" placeholder="Nome da nova categoria">'+
+    '<input type="text" id="nova-cat-produto-input" placeholder="Nome do novo tipo">'+
     '<button type="button" class="btn small ghost" id="btn-add-cat-produto">Adicionar</button></div></div>'+
     '</div>'+
     '<div id="itens-extra-lista"></div>'+
@@ -1510,6 +1663,11 @@ function viewVendas(){
     '<div><label>Observação (opcional)</label><input type="text" name="obs"></div>'+
     '<div class="hint" style="margin-top:6px;">Se um horário de entrega for definido, os dados do pedido são enviados por WhatsApp para o entregador automaticamente.</div>'+
     '<button type="submit" class="btn">Registrar venda</button></form></div>'+
+    '<div class="card"><details><summary><strong>Importar vendas em lote (planilha)</strong></summary>'+
+    '<div class="hint" style="margin-top:8px;">Suba um arquivo Excel ou CSV com as vendas do dia (pode usar o modelo em PDF pra preencher à mão e depois digitar, ou uma planilha já pronta). Cada linha vira uma venda: desconta do estoque de gás/água automaticamente, e vendas marcadas como "Marcou/Fiado" já entram no controle de fiado.</div>'+
+    '<input type="file" id="csv-vendas-input" accept=".csv,.txt,.tsv,.xlsx,.xls" style="margin-top:8px;">'+
+    '<div id="csv-vendas-mapping"></div>'+
+    '</details></div>'+
     '<div class="card"><h2>Vendas de hoje — total '+fmtMoney(totalHoje)+'</h2>'+
     '<div id="lista-vendas-hoje-wrap">'+vendasTable(vendasHoje)+'</div></div>'+
     '<div class="card"><h2>Histórico de vendas</h2>'+
@@ -1553,6 +1711,11 @@ function viewDespesas(){
     '<button type="button" class="btn small ghost" id="btn-add-cat-despesa">Adicionar</button></div></div>'+
     '<label>Descrição (opcional)</label><input type="text" name="descricao" placeholder="Ex: compra de vasilhames novos">'+
     '<button type="submit" class="btn">Registrar despesa</button></form></div>'+
+    '<div class="card"><details><summary><strong>Importar despesas em lote (planilha)</strong></summary>'+
+    '<div class="hint" style="margin-top:8px;">Suba um Excel ou CSV com as despesas do dia. Cada linha vira um lançamento de despesa.</div>'+
+    '<input type="file" id="csv-despesas-input" accept=".csv,.txt,.tsv,.xlsx,.xls" style="margin-top:8px;">'+
+    '<div id="csv-despesas-mapping"></div>'+
+    '</details></div>'+
     '<div class="card"><h2>Despesas de hoje — total '+fmtMoney(totalHoje)+'</h2>'+
     '<div id="lista-despesas-hoje-wrap">'+despesasTable(despesasHoje)+'</div></div>'+
     '<div class="card"><h2>Histórico de despesas</h2>'+
@@ -1574,13 +1737,15 @@ function viewCadastros(){
     {id:'clientes', label:'Clientes'},
     {id:'empresas', label:'Empresas'},
     {id:'produtos', label:'Produtos'},
-    {id:'categorias', label:'Categorias'},
+    {id:'categorias', label:'Tipos de Categoria'},
+    {id:'categoriasfixas', label:'Categorias Fixas'},
   ];
   let content = '';
   if(cadastroSub==='clientes') content = viewClientes();
   else if(cadastroSub==='empresas') content = viewEmpresas();
   else if(cadastroSub==='produtos') content = viewProdutos();
-  else content = viewGerenciarCategorias();
+  else if(cadastroSub==='categorias') content = viewGerenciarCategorias();
+  else content = viewCategoriasFixas();
   return '<div class="subtabs">'+subtabs.map(s=>'<button data-cadastro-sub="'+s.id+'" class="'+(cadastroSub===s.id?'active':'')+'">'+s.label+'</button>').join('')+'</div>'+content;
 }
 function viewClientes(){
@@ -1770,31 +1935,20 @@ function iniciarEditarAgendamento(id){
   if(!a || !fa) return;
   editAgendamentoId = a.id;
   fa.cliente.value=a.cliente||''; fa.data.value=a.data; fa.hora.value=a.hora;
-  if(fa.categoria) fa.categoria.value = a.categoria || '';
-  if(!fa.categoria.value && a.produto_nota){
+  let categoriaParaPreencher = a.categoria || '';
+  if(!categoriaParaPreencher && a.produto_nota){
     // agendamento antigo, criado antes da categoria existir: joga tudo como texto livre
-    if(fa.categoria) fa.categoria.value = state.categoriasProdutos.find(c=>!isControlada(c)) || '';
+    categoriaParaPreencher = state.categoriasProdutos.find(c=>!isControlada(c)) || '';
   }
-  if(fa.produto_livre) fa.produto_livre.value = (a.categoria && !isControlada(a.categoria)) ? (a.produto||a.produto_nota||'') : '';
   if(fa.quantidade) fa.quantidade.value = a.quantidade || 1;
   fa.tipo_entrega.value=a.tipo_entrega||''; fa.empresa.value=a.empresa||'';
   if(fa.pagamento) fa.pagamento.value=a.pagamento||PAGAMENTOS[0];
   if(fa.valor) fa.valor.value = a.valor ? Number(a.valor).toFixed(2) : '';
   if(fa.frete) fa.frete.value=a.frete||'';
   toggleDetalhesEntregaAgendamento();
-  toggleProdutoAgendamento();
-  const selProdCatAg = document.getElementById('sel-produto-catalogo-ag');
-  const manualWrapAg = document.getElementById('wrap-produto-manual-ag');
-  if(selProdCatAg && fa.categoria.value && !isControlada(fa.categoria.value)){
-    const nomeProduto = fa.produto_livre.value;
-    const existe = Array.from(selProdCatAg.options).some(o=>o.value===nomeProduto);
-    if(existe){
-      selProdCatAg.value = nomeProduto;
-      if(manualWrapAg) manualWrapAg.style.display = 'none';
-    } else if(nomeProduto){
-      selProdCatAg.value = '__outro__';
-      if(manualWrapAg) manualWrapAg.style.display = 'block';
-    }
+  if(categoriaParaPreencher && seletorAgendamento){
+    const nomeProduto = (a.categoria && !isControlada(a.categoria)) ? (a.produto||a.produto_nota||'') : '';
+    seletorAgendamento.setValor(categoriaParaPreencher, nomeProduto);
   }
   toggleAvisoRetroativoAgendamento();
   fa.querySelector('button[type=submit]').textContent='Salvar alterações';
@@ -1807,6 +1961,79 @@ function iniciarFinalizarEntrega(id){
   prefillVenda = { cliente:a.cliente||'', tipo_entrega:a.tipo_entrega||'', empresa:a.empresa||'', entrega_data:a.data||'', entrega_hora:a.hora||'', obs:a.produto_nota||'', pagamento:a.pagamento||'', frete:a.frete||'', categoria:a.categoria||'', produto_livre:(a.categoria && !isControlada(a.categoria))?(a.produto||''):'', quantidade:a.quantidade||'' };
   currentTab = 'vendas';
   renderAll();
+}
+function diaChecklist(data){
+  if(!state.checklistDias[data]) state.checklistDias[data] = {marcacoes:{}, extras:[]};
+  if(!state.checklistDias[data].marcacoes) state.checklistDias[data].marcacoes = {};
+  if(!state.checklistDias[data].extras) state.checklistDias[data].extras = [];
+  return state.checklistDias[data];
+}
+function viewChecklist(){
+  if(!checklistDataAtual) checklistDataAtual = todayStr();
+  const data = checklistDataAtual;
+  const hoje = data===todayStr();
+  const dia = diaChecklist(data);
+  const itens = state.checklistRotina.map(it=>({id:it.id, texto:it.texto, fixo:true}))
+    .concat(dia.extras.map(it=>({id:it.id, texto:it.texto, fixo:false})));
+  const linhas = itens.map(function(it){
+    const marc = dia.marcacoes[it.id];
+    const acoes = hoje ? (
+      '<div class="checklist-acoes">'+
+      '<button type="button" class="act-link" data-edit-item-checklist="'+it.id+'">✎ editar</button>'+
+      '<button type="button" class="act-link" data-toggle-tipo-item="'+it.id+'">'+(it.fixo?'↔ tornar esporádico':'↔ tornar fixo')+'</button>'+
+      '<button type="button" class="del-link" data-del-item-checklist="'+it.id+'">🗑 excluir</button>'+
+      '</div>'
+    ) : '';
+    if(hoje && editChecklistItemId===it.id){
+      return '<div class="checklist-item">'+
+        '<div class="checklist-texto" style="flex:1;"><input type="text" id="input-edit-item-checklist" value="'+it.texto+'" style="width:100%;"></div>'+
+        '<div class="checklist-acoes">'+
+        '<button type="button" class="act-link" data-salvar-item-checklist="'+it.id+'">✓ salvar</button>'+
+        '<button type="button" class="del-link" data-cancelar-item-checklist="1">cancelar</button>'+
+        '</div></div>';
+    }
+    if(marc){
+      return '<div class="checklist-item feito">'+
+        '<div class="checklist-texto"><span class="check-ok">✓</span> <span class="riscado">'+it.texto+'</span>'+(it.fixo?'':' <span class="hint">(do dia)</span>')+'</div>'+
+        '<div class="checklist-meta">Feito por <strong>'+marc.responsavel+'</strong> às '+marc.horario+
+        (hoje?' <button type="button" class="del-link" data-desmarcar-check="'+it.id+'">desfazer</button>':'')+'</div>'+
+        acoes+
+        '</div>';
+    }
+    return '<div class="checklist-item">'+
+      '<div class="checklist-texto">'+it.texto+(it.fixo?'':' <span class="hint">(do dia)</span>')+'</div>'+
+      (hoje ? '<select class="checklist-select-func" data-marcar-check="'+it.id+'">'+opcoesComPlaceholder(state.funcionarios,'Quem fez?')+'</select>' : '<span class="hint">pendente</span>')+
+      acoes+
+      '</div>';
+  }).join('');
+  const listaHtml = itens.length===0 ? '<div class="empty">Nenhum item no checklist ainda. Adicione um item de rotina ou do dia abaixo.</div>' : '<div class="checklist-lista">'+linhas+'</div>';
+
+  const funcionariosHtml = state.funcionarios.map(f=>
+    '<span class="badge nota" style="margin:2px 4px 2px 0;display:inline-flex;align-items:center;gap:4px;">'+f+
+    '<button type="button" class="del-link" data-del-funcionario="'+f+'" style="margin-left:2px;">✕</button></span>').join('');
+
+  return '<div class="card"><h2>Checklist Diário</h2>'+
+    '<div class="checklist-nav">'+
+    '<button type="button" class="btn small ghost" id="btn-checklist-anterior">← dia anterior</button>'+
+    '<strong>'+fmtDate(data)+(hoje?' (hoje)':'')+'</strong>'+
+    '<button type="button" class="btn small ghost" id="btn-checklist-proximo" '+(hoje?'disabled':'')+'>próximo dia →</button>'+
+    (hoje?'':'<button type="button" class="link-btn" id="btn-checklist-hoje">voltar pra hoje</button>')+
+    '</div>'+
+    (hoje?'':'<div class="hint" style="margin-top:8px;">Dias anteriores são só leitura — não dá pra marcar ou desmarcar itens de outro dia.</div>')+
+    listaHtml+
+    (hoje?('<div style="margin-top:14px;"><button type="button" class="btn small" id="btn-abrir-add-item">+ Adicionar item</button>'+
+      '<div id="wrap-add-item-checklist" style="display:none;margin-top:10px;" class="form-row">'+
+      '<div><label>Texto do item</label><input type="text" id="input-novo-item-checklist" placeholder="Ex: Conferir nível dos tanques"></div>'+
+      '<div><label>Tipo</label><select id="sel-tipo-item-checklist"><option value="dia">Só hoje</option><option value="rotina">Rotina fixa (todo dia)</option></select></div>'+
+      '<div style="align-self:end;"><button type="button" class="btn small" id="btn-confirmar-add-item">Adicionar</button></div>'+
+      '</div></div>'):'')+
+    '</div>'+
+    '<div class="card"><h2>Funcionários</h2>'+
+    '<div class="hint">Lista usada no "Quem fez?" de cada item do checklist.</div>'+
+    '<div style="margin-top:8px;">'+(funcionariosHtml||'<span class="hint">Nenhum funcionário cadastrado ainda.</span>')+'</div>'+
+    '<div class="inline-add" style="margin-top:10px;"><input type="text" id="input-novo-funcionario" placeholder="Nome do funcionário">'+
+    '<button type="button" class="btn small ghost" id="btn-add-funcionario">Adicionar</button></div>'+
+    '</div>';
 }
 function viewAgendamentos(){
   const hoje = todayStr();
@@ -1821,7 +2048,7 @@ function viewAgendamentos(){
     '<label style="display:flex;align-items:center;gap:8px;margin:0;font-size:13px;"><input type="checkbox" id="ag-confirma-retroativo" name="confirma_retroativo" style="width:auto;">Sei que essa data já passou, quero lançar mesmo assim</label>'+
     '</div>'+
     '<div class="form-row">'+
-    '<div><label>Categoria / produto <span class="req">*</span></label><select name="categoria" id="sel-categoria-ag" required>'+categoriaOptions()+'</select></div>'+
+    htmlSeletorCategoria({categoriaHiddenId:'sel-categoria-ag', grupoId:'sel-grupo-ag', etiquetaWrapId:'wrap-etiqueta-ag', etiquetaId:'sel-etiqueta-ag', required:true})+
     '<div id="wrap-produto-ag" style="display:none;"><label>Produto <span class="req">*</span></label><select id="sel-produto-catalogo-ag"></select>'+
     '<div id="wrap-produto-manual-ag" style="display:none;margin-top:8px;"><label>Nome do produto (digite) <span class="req">*</span></label><input type="text" id="ag-produto-livre" name="produto_livre" placeholder="Nome do item"></div></div>'+
     '<div><label>Quantidade</label><input type="number" name="quantidade" min="1" value="1" step="1"></div>'+
@@ -1853,7 +2080,18 @@ function viewConfig(){
   const statusTxt = permissao==='granted' ? '<span class="badge pago">ativadas</span>' :
     permissao==='denied' ? '<span class="badge fiado">bloqueadas pelo navegador</span>' :
     '<span class="badge nota">não ativadas</span>';
-  return '<div class="card"><h2>App no celular e notificações</h2>'+
+  const mkAtual = monthKey(todayStr());
+  const metaMensalAtualCfg = metaMensalP13(mkAtual);
+  const comunicadosAtivos = state.comunicados.filter(c=>c.ativo!==false).length;
+  return '<div class="card"><h2>🎯 Meta de vendas</h2>'+
+    '<div class="hint">'+(metaMensalAtualCfg>0 ? 'Meta de '+nomeMes(mkAtual)+': '+arred1(metaMensalAtualCfg)+' cargas de P13.' : 'Nenhuma meta configurada para '+nomeMes(mkAtual)+' ainda.')+'</div>'+
+    '<button type="button" class="btn small ghost" id="btn-abrir-metas" style="margin-top:10px;">Abrir Meta</button>'+
+    '</div>'+
+    '<div class="card"><h2>🔔 Comunicados internos</h2>'+
+    '<div class="hint">'+comunicadosAtivos+' comunicado(s) ativo(s), aparecendo no banner da página inicial pra equipe.</div>'+
+    '<button type="button" class="btn small ghost" id="btn-abrir-comunicados" style="margin-top:10px;">Abrir Comunicados</button>'+
+    '</div>'+
+    '<div class="card"><h2>App no celular e notificações</h2>'+
     '<div class="hint">Instale o sistema como app na tela inicial e receba avisos de novos agendamentos.</div>'+
     '<details style="margin-top:8px;"><summary>Como instalar na tela inicial</summary>'+
     '<div class="hint" style="margin-top:6px;">Chrome (Android): menu → "Adicionar à tela inicial". Safari (iPhone): Compartilhar → "Adicionar à Tela de Início". Atualiza sozinho, sem precisar reinstalar.</div></details>'+
@@ -2182,8 +2420,16 @@ function renderHistoricoChart(){
 function relatorioEmpresas(){
   return '<h3>Filtrar por período</h3><div class="form-row">'+
     '<div><label>De</label><input type="date" id="re-de" value="'+firstOfMonth()+'"></div>'+
-    '<div><label>Até</label><input type="date" id="re-ate" value="'+todayStr()+'"></div></div>'+
+    '<div><label>Até</label><input type="date" id="re-ate" value="'+todayStr()+'"></div>'+
+    '<div><label>Empresa conveniada</label><select id="re-empresa"><option value="">Todas as empresas</option>'+empresasOptions_lista().map(n=>'<option value="'+n+'">'+n+'</option>').join('')+'</select></div>'+
+    '</div>'+
     '<button class="btn small ghost" id="re-filtrar">Filtrar</button><div id="re-resultado" style="margin-top:16px;"></div>';
+}
+function empresasOptions_lista(){
+  const set = {};
+  state.empresas.forEach(e=>{ if(e.nome) set[e.nome]=true; });
+  state.vendas.forEach(v=>{ if(v.empresa) set[v.empresa]=true; });
+  return Object.keys(set).sort((a,b)=>a.localeCompare(b,'pt-BR'));
 }
 
 function renderRelatorioItensResultado(){
@@ -2295,50 +2541,140 @@ function renderRelatorioNotasResultado(){
 }
 function renderRelatorioEmpresasResultado(){
   const de = document.getElementById('re-de').value, ate = document.getElementById('re-ate').value;
-  const filtradas = state.vendas.filter(v=> v.data>=de && v.data<=ate && v.empresa);
-  const porEmpresa = {};
-  filtradas.forEach(v=>{ porEmpresa[v.empresa] = (porEmpresa[v.empresa]||0) + v.valor_total; });
-  const linhas = Object.entries(porEmpresa).sort((a,b)=>b[1]-a[1]);
-  document.getElementById('re-resultado').innerHTML = linhas.length===0 ? '<div class="empty">Nenhuma venda com empresa conveniada nesse período.</div>' :
-    '<div class="table-wrap"><table><thead><tr><th>Empresa</th><th>Total no período</th></tr></thead><tbody>'+
-    linhas.map(l=>'<tr><td>'+l[0]+'</td><td>'+fmtMoney(l[1])+'</td></tr>').join('')+'</tbody></table></div>';
+  const empresaSel = document.getElementById('re-empresa').value;
+  const wrap = document.getElementById('re-resultado');
+  if(!empresaSel){
+    const filtradas = state.vendas.filter(v=> v.data>=de && v.data<=ate && v.empresa);
+    const porEmpresa = {};
+    filtradas.forEach(v=>{ porEmpresa[v.empresa] = (porEmpresa[v.empresa]||0) + v.valor_total; });
+    const linhas = Object.entries(porEmpresa).sort((a,b)=>b[1]-a[1]);
+    wrap.innerHTML = linhas.length===0 ? '<div class="empty">Nenhuma venda com empresa conveniada nesse período.</div>' :
+      '<div class="table-wrap"><table><thead><tr><th>Empresa</th><th>Total no período</th></tr></thead><tbody>'+
+      linhas.map(l=>'<tr><td>'+l[0]+'</td><td>'+fmtMoney(l[1])+'</td></tr>').join('')+'</tbody></table></div>';
+    return;
+  }
+  const vendasEmpresa = state.vendas.filter(v=>v.data>=de && v.data<=ate && v.empresa===empresaSel).sort((a,b)=>a.data.localeCompare(b.data));
+  const total = vendasEmpresa.reduce((s,v)=>s+v.valor_total,0);
+  const mesRef = monthKey(de);
+  const tabelaVendas = vendasEmpresa.length===0 ? '<div class="empty">Nenhuma venda dessa empresa nesse período.</div>' :
+    '<div class="table-wrap"><table><thead><tr><th>Data</th><th>Produto</th><th>Cliente</th><th>Valor</th></tr></thead><tbody>'+
+    vendasEmpresa.map(v=>'<tr><td>'+fmtDate(v.data)+'</td><td>'+v.categoria+'</td><td>'+(v.cliente||'—')+'</td><td>'+fmtMoney(v.valor_total)+'</td></tr>').join('')+
+    '</tbody></table></div>';
+  wrap.innerHTML = '<div class="metric" style="max-width:280px;margin-bottom:12px;"><div class="label">Total — '+empresaSel+'</div><div class="value">'+fmtMoney(total)+'</div></div>'+
+    tabelaVendas+
+    '<h3 style="margin-top:18px;">Anexos do convênio — '+nomeMes(mesRef)+'</h3>'+
+    '<div class="hint">Fotos do talão fiscal e PDFs de nota — não precisam ser anexados na hora da venda, suba quando for mais prático (ex: no fim do dia). No dia 01, gere o PDF completo do mês anterior com um clique.</div>'+
+    '<input type="file" id="re-anexo-input" accept="image/*,.pdf" multiple style="margin-top:8px;">'+
+    '<div id="re-anexos-lista" class="hint" style="margin-top:10px;">Carregando anexos...</div>'+
+    '<button class="btn small" id="btn-gerar-pdf-convenio" style="margin-top:12px;">📄 Gerar PDF do convênio (vendas + anexos)</button>';
+  carregarERenderizarAnexos(empresaSel, mesRef);
+}
+async function carregarAnexosConvenio(empresa, mes){
+  try{
+    const {data,error} = await supabaseClient.from('app_data').select('valor').eq('chave','anexo:'+empresa+':'+mes).single();
+    if(error||!data) return [];
+    return data.valor||[];
+  }catch(e){ return []; }
+}
+async function salvarAnexosConvenio(empresa, mes, lista){
+  await supabaseClient.from('app_data').upsert({chave:'anexo:'+empresa+':'+mes, valor:lista, atualizado_em:new Date().toISOString()},{onConflict:'chave'});
+}
+async function carregarERenderizarAnexos(empresa, mes){
+  const lista = await carregarAnexosConvenio(empresa, mes);
+  window.__anexosConvenioAtual = {empresa, mes, lista};
+  const box = document.getElementById('re-anexos-lista');
+  if(!box) return;
+  if(lista.length===0){ box.innerHTML = '<div class="empty">Nenhum anexo ainda esse mês.</div>'; return; }
+  box.innerHTML = '<div class="table-wrap"><table><thead><tr><th>Arquivo</th><th>Tipo</th><th></th></tr></thead><tbody>'+
+    lista.map(a=>'<tr><td>'+a.nome+'</td><td>'+(a.tipo==='pdf'?'PDF':'Foto')+'</td><td><button class="del-link" data-del-anexo="'+a.id+'">🗑 excluir</button></td></tr>').join('')+
+    '</tbody></table></div>';
+}
+function comprimirImagemArquivo(file){
+  return new Promise((resolve)=>{
+    const reader = new FileReader();
+    reader.onload = (ev)=>{
+      const img = new Image();
+      img.onload = ()=>{
+        const maxW = 1400;
+        const scale = Math.min(1, maxW/img.width);
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width*scale; canvas.height = img.height*scale;
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', 0.75));
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+function lerArquivoComoDataURL(file){
+  return new Promise((resolve)=>{
+    const reader = new FileReader();
+    reader.onload = (ev)=>resolve(ev.target.result);
+    reader.readAsDataURL(file);
+  });
+}
+async function gerarPdfConvenio(empresa, de, ate, vendas, anexos){
+  const { PDFDocument, StandardFonts, rgb } = PDFLib;
+  const pdf = await PDFDocument.create();
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  const fontBold = await pdf.embedFont(StandardFonts.HelveticaBold);
+  let page = pdf.addPage([595,842]);
+  let y = 800;
+  const linha = (texto, tamanho, negrito)=>{
+    if(y<50){ page = pdf.addPage([595,842]); y = 800; }
+    page.drawText(texto, {x:40, y, size:tamanho||11, font: negrito?fontBold:font, color:rgb(0.1,0.1,0.15)});
+    y -= (tamanho||11)+8;
+  };
+  linha('Relatório de Convênio — '+empresa, 16, true);
+  linha('Período: '+fmtDate(de)+' a '+fmtDate(ate), 11);
+  y -= 6;
+  const total = vendas.reduce((s,v)=>s+v.valor_total,0);
+  linha('Total do período: '+fmtMoney(total), 13, true);
+  y -= 10;
+  linha('Data        Produto                          Cliente                  Valor', 10, true);
+  vendas.forEach(v=>{
+    const l = fmtDate(v.data)+'  '+(v.categoria||'').padEnd(30).slice(0,30)+' '+(v.cliente||'—').padEnd(22).slice(0,22)+' '+fmtMoney(v.valor_total);
+    linha(l, 9.5);
+  });
+  for(const anexo of anexos){
+    if(anexo.tipo==='pdf'){
+      try{
+        const src = await PDFDocument.load(anexo.dataUrl);
+        const paginas = await pdf.copyPages(src, src.getPageIndices());
+        paginas.forEach(p=>pdf.addPage(p));
+      }catch(e){ console.error('Erro ao anexar PDF', anexo.nome, e); }
+    } else {
+      try{
+        const img = anexo.dataUrl.includes('image/png') ? await pdf.embedPng(anexo.dataUrl) : await pdf.embedJpg(anexo.dataUrl);
+        const p = pdf.addPage([595,842]);
+        const escala = Math.min(515/img.width, 780/img.height, 1);
+        const w = img.width*escala, h = img.height*escala;
+        p.drawImage(img, {x:(595-w)/2, y:(842-h)/2, width:w, height:h});
+      }catch(e){ console.error('Erro ao anexar imagem', anexo.nome, e); }
+    }
+  }
+  const bytes = await pdf.save();
+  const blob = new Blob([bytes], {type:'application/pdf'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'convenio-'+empresa.replace(/\s+/g,'-')+'-'+monthKey(de)+'.pdf';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 /* ---------- HANDLERS ---------- */
 function attachHandlers(){
-  const selCat = document.getElementById('sel-categoria');
-  if(selCat){
-    const selProdutoCatalogo = document.getElementById('sel-produto-catalogo');
-    const produtoLivreMain = document.querySelector('input[name="produto_livre"]');
-    const valorUnitMain = document.querySelector('input[name="valor_unit"]');
-    const manualWrap = document.getElementById('wrap-produto-manual');
-    const handleProdutoCatalogoChange = ()=>{
-      if(!selProdutoCatalogo) return;
-      if(selProdutoCatalogo.value==='__outro__'){
-        if(manualWrap) manualWrap.style.display = 'block';
-        if(produtoLivreMain){ produtoLivreMain.value=''; produtoLivreMain.focus(); }
-      } else {
-        if(manualWrap) manualWrap.style.display = 'none';
-        if(produtoLivreMain) produtoLivreMain.value = selProdutoCatalogo.value;
-        const opt = selProdutoCatalogo.selectedOptions[0];
-        if(opt && opt.dataset.preco && valorUnitMain) valorUnitMain.value = Number(opt.dataset.preco).toFixed(2);
-      }
-    };
-    if(selProdutoCatalogo) selProdutoCatalogo.onchange = handleProdutoCatalogoChange;
-    const toggle = ()=>{
-      document.getElementById('wrap-produto').style.display = 'block';
-      const unico = popularSelectProdutoCatalogo('sel-produto-catalogo', selCat.value);
-      if(manualWrap) manualWrap.style.display = 'none';
-      if(unico) handleProdutoCatalogoChange();
-    };
-    selCat.onchange = toggle;
-    toggle();
-  }
+  seletorVendaMain = wireSeletorCategoria({
+    grupoId:'sel-grupo', etiquetaWrapId:'wrap-etiqueta', etiquetaId:'sel-etiqueta',
+    produtoWrapId:'wrap-produto', produtoId:'sel-produto-catalogo', categoriaHiddenId:'sel-categoria',
+    manualWrapId:'wrap-produto-manual',
+    produtoLivreEl: document.querySelector('input[name="produto_livre"]'),
+    valorUnitEl: document.querySelector('input[name="valor_unit"]')
+  });
   const fvPre = document.getElementById('form-venda');
   if(fvPre && prefillVenda){
     if(prefillVenda.cliente) fvPre.cliente.value = prefillVenda.cliente;
-    if(prefillVenda.categoria) fvPre.categoria.value = prefillVenda.categoria;
-    if(prefillVenda.produto_livre) fvPre.produto_livre.value = prefillVenda.produto_livre;
     if(prefillVenda.quantidade) fvPre.quantidade.value = prefillVenda.quantidade;
     if(prefillVenda.tipo_entrega) fvPre.tipo_entrega.value = prefillVenda.tipo_entrega;
     if(prefillVenda.empresa) fvPre.empresa.value = prefillVenda.empresa;
@@ -2347,18 +2683,8 @@ function attachHandlers(){
     if(prefillVenda.obs) fvPre.obs.value = prefillVenda.obs;
     if(prefillVenda.pagamento) fvPre.pagamento.value = prefillVenda.pagamento;
     if(prefillVenda.frete) fvPre.frete.value = prefillVenda.frete;
+    if(prefillVenda.categoria && seletorVendaMain) seletorVendaMain.setValor(prefillVenda.categoria, prefillVenda.produto_livre);
     prefillVenda = null;
-    const wrapProdutoEl = document.getElementById('wrap-produto');
-    if(wrapProdutoEl) wrapProdutoEl.style.display = 'block';
-    popularSelectProdutoCatalogo('sel-produto-catalogo', fvPre.categoria.value);
-    const selProdCatPre = document.getElementById('sel-produto-catalogo');
-    const manualWrapPre = document.getElementById('wrap-produto-manual');
-    if(selProdCatPre && fvPre.produto_livre.value){
-      const nomeProduto = fvPre.produto_livre.value;
-      const existe = Array.from(selProdCatPre.options).some(o=>o.value===nomeProduto);
-      if(existe){ selProdCatPre.value = nomeProduto; if(manualWrapPre) manualWrapPre.style.display='none'; }
-      else { selProdCatPre.value = '__outro__'; if(manualWrapPre) manualWrapPre.style.display='block'; }
-    }
   }
   const btnNovaCatProduto = document.getElementById('btn-nova-cat-produto');
   if(btnNovaCatProduto) btnNovaCatProduto.onclick = ()=>{ document.getElementById('nova-cat-produto-wrap').style.display='block'; };
@@ -2366,6 +2692,7 @@ function attachHandlers(){
   if(btnAddCatProduto) btnAddCatProduto.onclick = async ()=>{
     const val = document.getElementById('nova-cat-produto-input').value.trim();
     if(!val) return;
+    if(categoriaControladaEquivalente(val)){ alert('Isso parece um item de gás ou água, que já é controlado automaticamente pelo estoque — escolha Categoria = Gás ou Água no formulário em vez de criar um tipo novo.'); return; }
     if(!state.categoriasProdutos.includes(val)) state.categoriasProdutos.push(val);
     await save('categoriasProdutos');
     renderAll();
@@ -2863,16 +3190,7 @@ function attachHandlers(){
       if(!v || !fvEl) return;
       editVendaId = v.id;
       fvEl.data.value=v.data; fvEl.cliente.value=v.cliente||''; fvEl.canal.value=v.canal;
-      fvEl.categoria.value=v.categoria;
-      fvEl.categoria.dispatchEvent(new Event('change'));
-      if(!isControlada(v.categoria) && fvEl.produto_livre) fvEl.produto_livre.value = v.produto;
-      const selProdCatEdit = document.getElementById('sel-produto-catalogo');
-      const manualWrapEdit = document.getElementById('wrap-produto-manual');
-      if(selProdCatEdit){
-        const existe = Array.from(selProdCatEdit.options).some(o=>o.value===v.produto);
-        if(existe){ selProdCatEdit.value = v.produto; if(manualWrapEdit) manualWrapEdit.style.display='none'; }
-        else if(!isControlada(v.categoria)){ selProdCatEdit.value = '__outro__'; if(manualWrapEdit) manualWrapEdit.style.display='block'; }
-      }
+      if(seletorVendaMain) seletorVendaMain.setValor(v.categoria, v.produto);
       fvEl.quantidade.value=v.quantidade; fvEl.valor_unit.value=v.valor_unit; fvEl.pagamento.value=v.pagamento; fvEl.nota.value=v.nota;
       fvEl.tipo_entrega.value=v.tipo_entrega; fvEl.empresa.value=v.empresa||''; fvEl.entrega_data.value=v.entrega_data||''; fvEl.entrega_hora.value=v.entrega_hora||''; fvEl.obs.value=v.obs||'';
       if(fvEl.frete) fvEl.frete.value = v.frete||'';
@@ -3058,6 +3376,25 @@ function attachHandlers(){
     if(!file) return;
     lerArquivoPlanilha(file, (headers, linhas)=>{ renderHistoricoMapping(headers, linhas); }, 'historico-mapping');
   };
+
+  const csvVendasInput = document.getElementById('csv-vendas-input');
+  if(csvVendasInput) csvVendasInput.onchange = (e)=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    lerArquivoPlanilha(file, (headers, linhas)=>{
+      csvVendasHeaders = headers; csvVendasRows = linhas;
+      renderCsvVendasMapping();
+    }, 'csv-vendas-mapping');
+  };
+  const csvDespesasInput = document.getElementById('csv-despesas-input');
+  if(csvDespesasInput) csvDespesasInput.onchange = (e)=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    lerArquivoPlanilha(file, (headers, linhas)=>{
+      csvDespesasHeaders = headers; csvDespesasRows = linhas;
+      renderCsvDespesasMapping();
+    }, 'csv-despesas-mapping');
+  };
   document.querySelectorAll('[data-del-historico]').forEach(btn=>btn.onclick=async()=>{
     const mes = btn.dataset.delHistorico;
     if(!confirm('Excluir o histórico de '+mes+'?')) return;
@@ -3178,6 +3515,45 @@ function attachHandlers(){
   const rentFiltrar = document.getElementById('rent-filtrar'); if(rentFiltrar) rentFiltrar.onclick = renderRelatorioEntregasResultado;
   const rnFiltrar = document.getElementById('rn-filtrar'); if(rnFiltrar) rnFiltrar.onclick = renderRelatorioNotasResultado;
   const reFiltrar = document.getElementById('re-filtrar'); if(reFiltrar) reFiltrar.onclick = renderRelatorioEmpresasResultado;
+  const reEmpresaSel = document.getElementById('re-empresa'); if(reEmpresaSel) reEmpresaSel.onchange = renderRelatorioEmpresasResultado;
+  const reAnexoInput = document.getElementById('re-anexo-input');
+  if(reAnexoInput) reAnexoInput.onchange = async (e)=>{
+    const arquivos = Array.from(e.target.files||[]);
+    if(arquivos.length===0) return;
+    const ctx = window.__anexosConvenioAtual;
+    if(!ctx) return;
+    const box = document.getElementById('re-anexos-lista');
+    if(box) box.innerHTML = '<div class="hint">Enviando '+arquivos.length+' arquivo(s)...</div>';
+    for(const file of arquivos){
+      const ehPdf = file.type==='application/pdf' || /\.pdf$/i.test(file.name);
+      const dataUrl = ehPdf ? await lerArquivoComoDataURL(file) : await comprimirImagemArquivo(file);
+      ctx.lista.push({id:uid(), nome:file.name, tipo: ehPdf?'pdf':'foto', dataUrl});
+    }
+    await salvarAnexosConvenio(ctx.empresa, ctx.mes, ctx.lista);
+    reAnexoInput.value = '';
+    carregarERenderizarAnexos(ctx.empresa, ctx.mes);
+  };
+  document.querySelectorAll('[data-del-anexo]').forEach(btn=>btn.onclick=async()=>{
+    const ctx = window.__anexosConvenioAtual;
+    if(!ctx) return;
+    if(!confirm('Excluir esse anexo?')) return;
+    ctx.lista = ctx.lista.filter(a=>a.id!==btn.dataset.delAnexo);
+    await salvarAnexosConvenio(ctx.empresa, ctx.mes, ctx.lista);
+    carregarERenderizarAnexos(ctx.empresa, ctx.mes);
+  });
+  const btnGerarPdfConvenio = document.getElementById('btn-gerar-pdf-convenio');
+  if(btnGerarPdfConvenio) btnGerarPdfConvenio.onclick = async ()=>{
+    const de = document.getElementById('re-de').value, ate = document.getElementById('re-ate').value;
+    const empresaSel = document.getElementById('re-empresa').value;
+    const ctx = window.__anexosConvenioAtual;
+    if(!empresaSel || !ctx) return;
+    btnGerarPdfConvenio.disabled = true; btnGerarPdfConvenio.textContent = 'Gerando...';
+    try{
+      const vendasEmpresa = state.vendas.filter(v=>v.data>=de && v.data<=ate && v.empresa===empresaSel).sort((a,b)=>a.data.localeCompare(b.data));
+      await gerarPdfConvenio(empresaSel, de, ate, vendasEmpresa, ctx.lista);
+    }catch(e){ console.error(e); alert('Não foi possível gerar o PDF: '+(e.message||e)); }
+    btnGerarPdfConvenio.disabled = false; btnGerarPdfConvenio.textContent = '📄 Gerar PDF do convênio (vendas + anexos)';
+  };
   if(relatorioSub==='vendas' && document.getElementById('rv-resultado')) renderRelatorioVendasResultado();
   if(relatorioSub==='despesas' && document.getElementById('rd-resultado')) renderRelatorioDespesasResultado();
   if(relatorioSub==='entregas' && document.getElementById('rent-resultado')) renderRelatorioEntregasResultado();
@@ -3301,35 +3677,22 @@ function attachHandlers(){
   const selTipoEntregaAg = document.getElementById('sel-tipo-entrega-ag');
   if(selTipoEntregaAg) selTipoEntregaAg.onchange = toggleDetalhesEntregaAgendamento;
   toggleDetalhesEntregaAgendamento();
-  const agProdutoLivre = document.getElementById('ag-produto-livre');
-  const agProdutoSelect = document.getElementById('sel-produto-catalogo-ag');
-  const agManualWrap = document.getElementById('wrap-produto-manual-ag');
   const agValorInput = document.querySelector('#form-agendamento [name="valor"]');
   const agQuantidadeInput = document.querySelector('#form-agendamento [name="quantidade"]');
-  const tentarPreencherValorAg = ()=>{
-    if(!agProdutoSelect || !agValorInput) return;
-    const opt = agProdutoSelect.selectedOptions[0];
-    if(!opt || !opt.dataset.preco) return;
+  const tentarPreencherValorAg = (opt)=>{
+    if(!agValorInput) return;
+    const o = opt || (document.getElementById('sel-produto-catalogo-ag') || {}).selectedOptions?.[0];
+    if(!o || !o.dataset || !o.dataset.preco) return;
     const qtd = Number(agQuantidadeInput ? agQuantidadeInput.value : 1) || 1;
-    agValorInput.value = (Math.round(Number(opt.dataset.preco)*qtd*100)/100).toFixed(2);
+    agValorInput.value = (Math.round(Number(o.dataset.preco)*qtd*100)/100).toFixed(2);
   };
-  const handleAgProdutoChange = ()=>{
-    if(!agProdutoSelect) return;
-    if(agProdutoSelect.value==='__outro__'){
-      if(agManualWrap) agManualWrap.style.display = 'block';
-      if(agProdutoLivre){ agProdutoLivre.value=''; agProdutoLivre.focus(); }
-    } else {
-      if(agManualWrap) agManualWrap.style.display = 'none';
-      if(agProdutoLivre) agProdutoLivre.value = agProdutoSelect.value;
-      tentarPreencherValorAg();
-    }
-  };
-  if(agProdutoSelect) agProdutoSelect.onchange = handleAgProdutoChange;
-  const selCategoriaAg = document.getElementById('sel-categoria-ag');
-  if(selCategoriaAg) selCategoriaAg.onchange = ()=>{ const unico = toggleProdutoAgendamento(); if(unico) handleAgProdutoChange(); };
-  const unicoInicialAg = toggleProdutoAgendamento();
-  if(unicoInicialAg) handleAgProdutoChange();
-  if(agQuantidadeInput) agQuantidadeInput.oninput = tentarPreencherValorAg;
+  seletorAgendamento = wireSeletorCategoria({
+    grupoId:'sel-grupo-ag', etiquetaWrapId:'wrap-etiqueta-ag', etiquetaId:'sel-etiqueta-ag',
+    produtoWrapId:'wrap-produto-ag', produtoId:'sel-produto-catalogo-ag', categoriaHiddenId:'sel-categoria-ag',
+    manualWrapId:'wrap-produto-manual-ag', produtoLivreEl: document.getElementById('ag-produto-livre'),
+    onProdutoChange: tentarPreencherValorAg
+  });
+  if(agQuantidadeInput) agQuantidadeInput.oninput = ()=>tentarPreencherValorAg();
   const agDataInput = document.getElementById('ag-data-input');
   if(agDataInput) agDataInput.onchange = toggleAvisoRetroativoAgendamento;
   toggleAvisoRetroativoAgendamento();
@@ -3399,6 +3762,121 @@ function attachHandlers(){
     }
     attachAgendamentoRowHandlers();
   };
+
+  /* ---- Checklist Diário ---- */
+  const btnChecklistAnterior = document.getElementById('btn-checklist-anterior');
+  if(btnChecklistAnterior) btnChecklistAnterior.onclick = ()=>{
+    const d = new Date(checklistDataAtual+'T12:00:00'); d.setDate(d.getDate()-1);
+    checklistDataAtual = d.toISOString().slice(0,10);
+    renderAll();
+  };
+  const btnChecklistProximo = document.getElementById('btn-checklist-proximo');
+  if(btnChecklistProximo) btnChecklistProximo.onclick = ()=>{
+    const d = new Date(checklistDataAtual+'T12:00:00'); d.setDate(d.getDate()+1);
+    const novaData = d.toISOString().slice(0,10);
+    checklistDataAtual = novaData > todayStr() ? todayStr() : novaData;
+    renderAll();
+  };
+  const btnChecklistHoje = document.getElementById('btn-checklist-hoje');
+  if(btnChecklistHoje) btnChecklistHoje.onclick = ()=>{ checklistDataAtual = todayStr(); renderAll(); };
+
+  document.querySelectorAll('[data-marcar-check]').forEach(sel=>sel.onchange=async()=>{
+    if(!sel.value) return;
+    const id = sel.dataset.marcarCheck;
+    const dia = diaChecklist(checklistDataAtual);
+    const agora = new Date();
+    dia.marcacoes[id] = {responsavel: sel.value, horario: String(agora.getHours()).padStart(2,'0')+':'+String(agora.getMinutes()).padStart(2,'0')};
+    await save('checklistDias');
+    renderAll();
+  });
+  document.querySelectorAll('[data-desmarcar-check]').forEach(btn=>btn.onclick=async()=>{
+    const id = btn.dataset.desmarcarCheck;
+    const dia = diaChecklist(checklistDataAtual);
+    delete dia.marcacoes[id];
+    await save('checklistDias');
+    renderAll();
+  });
+  document.querySelectorAll('[data-edit-item-checklist]').forEach(btn=>btn.onclick=()=>{
+    editChecklistItemId = btn.dataset.editItemChecklist;
+    renderAll();
+  });
+  document.querySelectorAll('[data-cancelar-item-checklist]').forEach(btn=>btn.onclick=()=>{
+    editChecklistItemId = null;
+    renderAll();
+  });
+  document.querySelectorAll('[data-salvar-item-checklist]').forEach(btn=>btn.onclick=async()=>{
+    const id = btn.dataset.salvarItemChecklist;
+    const novoTexto = document.getElementById('input-edit-item-checklist').value.trim();
+    if(!novoTexto) return;
+    const loc = localizarItemChecklist(id);
+    if(loc){
+      loc.arr[loc.idx].texto = novoTexto;
+      await save(loc.chave);
+    }
+    editChecklistItemId = null;
+    renderAll();
+  });
+  document.querySelectorAll('[data-toggle-tipo-item]').forEach(btn=>btn.onclick=async()=>{
+    const id = btn.dataset.toggleTipoItem;
+    const loc = localizarItemChecklist(id);
+    if(!loc) return;
+    const item = loc.arr.splice(loc.idx,1)[0];
+    const dia = diaChecklist(checklistDataAtual);
+    if(loc.tipo==='rotina'){
+      dia.extras.push(item);
+      await save('checklistRotina'); await save('checklistDias');
+    } else {
+      state.checklistRotina.push(item);
+      await save('checklistDias'); await save('checklistRotina');
+    }
+    renderAll();
+  });
+  document.querySelectorAll('[data-del-item-checklist]').forEach(btn=>btn.onclick=async()=>{
+    const id = btn.dataset.delItemChecklist;
+    if(!confirm('Excluir esse item do checklist? Isso não pode ser desfeito.')) return;
+    const loc = localizarItemChecklist(id);
+    if(!loc) return;
+    loc.arr.splice(loc.idx,1);
+    const dia = diaChecklist(checklistDataAtual);
+    delete dia.marcacoes[id];
+    await save(loc.chave);
+    await save('checklistDias');
+    renderAll();
+  });
+  const btnAbrirAddItem = document.getElementById('btn-abrir-add-item');
+  if(btnAbrirAddItem) btnAbrirAddItem.onclick = ()=>{ document.getElementById('wrap-add-item-checklist').style.display='flex'; };
+  const btnConfirmarAddItem = document.getElementById('btn-confirmar-add-item');
+  if(btnConfirmarAddItem) btnConfirmarAddItem.onclick = async ()=>{
+    const texto = document.getElementById('input-novo-item-checklist').value.trim();
+    const tipo = document.getElementById('sel-tipo-item-checklist').value;
+    if(!texto) return;
+    if(tipo==='rotina'){
+      state.checklistRotina.push({id:uid(), texto});
+      await save('checklistRotina');
+    } else {
+      const dia = diaChecklist(checklistDataAtual);
+      dia.extras.push({id:uid(), texto});
+      await save('checklistDias');
+    }
+    renderAll();
+  };
+  const btnAddFuncionario = document.getElementById('btn-add-funcionario');
+  if(btnAddFuncionario) btnAddFuncionario.onclick = async ()=>{
+    const inp = document.getElementById('input-novo-funcionario');
+    const nome = inp.value.trim();
+    if(!nome) return;
+    if(state.funcionarios.includes(nome)){ alert('Esse funcionário já está na lista.'); return; }
+    state.funcionarios.push(nome);
+    await save('funcionarios');
+    renderAll();
+  };
+  document.querySelectorAll('[data-del-funcionario]').forEach(btn=>btn.onclick=async()=>{
+    const nome = btn.dataset.delFuncionario;
+    if(!confirm('Remover "'+nome+'" da lista de funcionários?')) return;
+    state.funcionarios = state.funcionarios.filter(f=>f!==nome);
+    await save('funcionarios');
+    renderAll();
+  });
 
   const btnAtivarNotificacao = document.getElementById('btn-ativar-notificacao');
   if(btnAtivarNotificacao) btnAtivarNotificacao.onclick = pedirPermissaoNotificacao;
@@ -3480,6 +3958,16 @@ function attachHandlers(){
   if(btnVoltarComunicados) btnVoltarComunicados.onclick = ()=>{
     currentTab = telaAnteriorComunicados;
     editComunicadoId = null;
+    renderAll();
+  };
+  const btnAbrirMetas = document.getElementById('btn-abrir-metas');
+  if(btnAbrirMetas) btnAbrirMetas.onclick = ()=>{ currentTab = 'metas'; renderAll(); };
+  const btnVoltarMetas = document.getElementById('btn-voltar-metas');
+  if(btnVoltarMetas) btnVoltarMetas.onclick = ()=>{ currentTab = 'config'; renderAll(); };
+  const btnAbrirComunicados = document.getElementById('btn-abrir-comunicados');
+  if(btnAbrirComunicados) btnAbrirComunicados.onclick = ()=>{
+    telaAnteriorComunicados = 'config';
+    currentTab = 'comunicados';
     renderAll();
   };
   const btnCancelarComunicado = document.getElementById('btn-cancelar-comunicado');
@@ -3650,9 +4138,9 @@ function categoriaControladaEquivalente(texto){
   if(!chave) return false;
   const encontrada = CATEGORIAS_CONTROLADAS.find(c=>chaveNormalizada(c)===chave);
   if(encontrada) return true;
-  if(/(^|\s)g[aá]s(\s|$)|glp|botij[aã]o|carga de g[aá]s|vasilhame de g[aá]s|gas do povo/.test(chave)) return true;
-  if(/safira|d ?fonte|dfonte/.test(chave)) return true;
-  if(/agua/.test(chave) && /20/.test(chave)) return true;
+  if(/gas do povo/.test(chave)) return true;
+  if(/(carga|vasilhame).*g[aá]s|g[aá]s.*(carga|vasilhame)|glp|botij[aã]o/.test(chave)) return true;
+  if(/(carga|vasilhame).*[aá]gua|[aá]gua.*(carga|vasilhame)|safira|d ?fonte|dfonte/.test(chave)) return true;
   return false;
 }
 function renderCsvProdMapping(){
@@ -3662,33 +4150,66 @@ function renderCsvProdMapping(){
   wrap.innerHTML = '<div class="hint" style="margin-top:14px;">'+csvProdRows.length+' produtos encontrados. Confirme qual coluna corresponde a cada campo:</div>'+
     '<div class="mapping-row"><span>Nome do produto</span><select id="map-prod-nome">'+opts+'</select></div>'+
     '<div class="mapping-row"><span>Preço</span><select id="map-prod-preco">'+opts+'</select></div>'+
-    '<div class="mapping-row"><span>Categoria</span><select id="map-prod-categoria">'+optsVazio+'</select></div>'+
+    '<div class="mapping-row"><span>Tipo da Categoria (categoria do Bling)</span><select id="map-prod-categoria">'+optsVazio+'</select></div>'+
     '<div class="mapping-row"><span>Situação (Ativo/Inativo)</span><select id="map-prod-situacao">'+optsVazio+'</select></div>'+
     '<label style="display:flex;align-items:center;gap:8px;margin-top:10px;font-size:13px;font-weight:500;"><input type="checkbox" id="chk-somente-ativos" checked style="width:auto;">Importar somente produtos com situação "Ativo"</label>'+
-    '<div class="csv-preview"><table><thead><tr>'+csvProdHeaders.map(h=>'<th>'+h+'</th>').join('')+'</tr></thead>'+
+    '<div id="checklist-controlados-box" style="margin-top:12px;"></div>'+
+    '<div class="csv-preview" style="margin-top:10px;"><table><thead><tr>'+csvProdHeaders.map(h=>'<th>'+h+'</th>').join('')+'</tr></thead>'+
     '<tbody>'+csvProdRows.slice(0,3).map(r=>'<tr>'+csvProdHeaders.map(h=>'<td>'+r[h]+'</td>').join('')+'</tr>').join('')+'</tbody></table></div>'+
-    '<button class="btn green" id="btn-importar-csv-prod">Importar '+csvProdRows.length+' produtos</button>';
+    '<button class="btn green" id="btn-importar-csv-prod" style="margin-top:8px;">Importar '+csvProdRows.length+' produtos</button>';
   document.getElementById('map-prod-nome').value = guessHeaderPriority(csvProdHeaders,[['descrição','descricao','nome','produto']]);
   document.getElementById('map-prod-preco').value = guessHeaderPriority(csvProdHeaders,[['preço','preco','valor']]);
   document.getElementById('map-prod-categoria').value = guessHeaderPriority(csvProdHeaders,[['categoria']]);
   document.getElementById('map-prod-situacao').value = guessHeaderPriority(csvProdHeaders,[['situação','situacao']]);
+
+  const renderChecklistControlados = ()=>{
+    const colNome = document.getElementById('map-prod-nome').value;
+    const colCategoria = document.getElementById('map-prod-categoria').value;
+    const candidatos = [];
+    csvProdRows.forEach((r,indice)=>{
+      const nome = colNome ? (r[colNome]||'').trim() : '';
+      const categoria = colCategoria ? (r[colCategoria]||'').trim() : '';
+      if(!nome && !categoria) return;
+      if(categoriaControladaEquivalente(nome) || categoriaControladaEquivalente(categoria)){
+        candidatos.push({indice, nome, categoria});
+      }
+    });
+    const box = document.getElementById('checklist-controlados-box');
+    if(!box) return;
+    if(candidatos.length===0){
+      box.innerHTML = '<div class="hint">Nenhuma linha parecida com carga/vasilhame de gás, água ou Gás do Povo encontrada nessa planilha.</div>';
+      return;
+    }
+    box.innerHTML = '<div class="hint" style="background:var(--amber-tint);border-radius:8px;padding:8px 10px;"><strong>'+candidatos.length+' linha(s) parecem ser gás/água</strong> — como isso já é controlado pelo estoque (aba Categorias Fixas), elas vêm <strong>desmarcadas por padrão e NÃO serão importadas</strong>. Se alguma for realmente um produto diferente (falso alarme), marque a caixa dela pra importar mesmo assim.</div>'+
+      '<div class="cat-checklist" style="margin-top:8px;">'+candidatos.map(c=>
+        '<label class="checkbox-item"><input type="checkbox" class="chk-importar-controlado" data-indice="'+c.indice+'"> Importar mesmo assim: <strong>'+(c.nome||'(sem nome)')+'</strong> <span class="hint">— '+(c.categoria||'sem tipo')+'</span></label>'
+      ).join('')+'</div>';
+  };
+  document.getElementById('map-prod-nome').onchange = renderChecklistControlados;
+  document.getElementById('map-prod-categoria').onchange = renderChecklistControlados;
+  renderChecklistControlados();
+
   document.getElementById('btn-importar-csv-prod').onclick = async()=>{
     const colNome = document.getElementById('map-prod-nome').value;
     const colPreco = document.getElementById('map-prod-preco').value;
     const colCategoria = document.getElementById('map-prod-categoria').value;
     const colSituacao = document.getElementById('map-prod-situacao').value;
     const somenteAtivos = document.getElementById('chk-somente-ativos').checked;
+    const permitidosControlados = new Set(Array.from(document.querySelectorAll('.chk-importar-controlado:checked')).map(el=>Number(el.dataset.indice)));
     const existentes = new Set(state.produtos.map(p=>(p.categoria+'|'+p.nome).toLowerCase()));
     const vistos = new Set();
     const novos = [];
     const categoriasNovas = new Set();
     let duplicados = 0, ignoradosInativos = 0, ignoradosControlados = 0;
-    csvProdRows.filter(r=>r[colNome]).forEach(r=>{
+    csvProdRows.forEach((r,indice)=>{
+      if(!r[colNome]) return;
       if(somenteAtivos && colSituacao && r[colSituacao] && r[colSituacao].trim().toLowerCase()!=='ativo'){ ignoradosInativos++; return; }
       const nome = r[colNome].trim();
       let categoria = colCategoria ? (r[colCategoria]||'').trim() : '';
       if(!categoria) categoria = 'Mercearia';
-      if(categoriaControladaEquivalente(categoria) || categoriaControladaEquivalente(nome)){ ignoradosControlados++; return; }
+      if((categoriaControladaEquivalente(categoria) || categoriaControladaEquivalente(nome)) && !permitidosControlados.has(indice)){
+        ignoradosControlados++; return;
+      }
       const precoTxt = colPreco ? (r[colPreco]||'0') : '0';
       const preco = Number(precoTxt.replace(/\./g,'').replace(',','.')) || 0;
       const chave = (categoria+'|'+nome).toLowerCase();
@@ -3706,7 +4227,7 @@ function renderCsvProdMapping(){
     alert(novos.length+' produtos importados com sucesso.'+
       (duplicados>0 ? ' '+duplicados+' já existiam e foram ignorados.' : '')+
       (ignoradosInativos>0 ? ' '+ignoradosInativos+' estavam inativos e não foram importados.' : '')+
-      (ignoradosControlados>0 ? ' '+ignoradosControlados+' eram itens de gás/água (já controlados pelo estoque) e foram ignorados de propósito, pra não duplicar.' : ''));
+      (ignoradosControlados>0 ? ' '+ignoradosControlados+' eram itens de gás/água (já controlados pelo estoque) e foram ignorados, pra não duplicar.' : ''));
   };
 }
 function renderCsvFiadoMapping(){
@@ -3780,6 +4301,155 @@ function renderCsvFiadoMapping(){
     csvFiadoRows=null; csvFiadoHeaders=null;
     renderAll();
     alert((importadosFiado+importadosCredito)+' lançamento(s) importado(s) — '+importadosFiado+' de fiado e '+importadosCredito+' de crédito.'+(ignorados>0?' '+ignorados+' linha(s) ignoradas por falta de nome ou valor.':'')+(puladosPagos>0?' '+puladosPagos+' linha(s) já pagas foram puladas.':''));
+  };
+}
+function renderCsvVendasMapping(){
+  const wrap = document.getElementById('csv-vendas-mapping');
+  const opts = csvVendasHeaders.map(h=>'<option value="'+h+'">'+h+'</option>').join('');
+  const optsVazio = '<option value="">(nenhuma)</option>'+opts;
+  wrap.innerHTML = '<div class="hint" style="margin-top:14px;">'+csvVendasRows.length+' linha(s) encontradas. Confirme qual coluna corresponde a cada campo:</div>'+
+    '<div class="mapping-row"><span>Categoria / Produto <span class="req">*</span></span><select id="map-v-categoria">'+opts+'</select></div>'+
+    '<div class="mapping-row"><span>Quantidade</span><select id="map-v-qtd">'+optsVazio+'</select></div>'+
+    '<div class="mapping-row"><span>Valor unitário</span><select id="map-v-valorunit">'+optsVazio+'</select></div>'+
+    '<div class="mapping-row"><span>Valor total (se não tiver unitário)</span><select id="map-v-valortotal">'+optsVazio+'</select></div>'+
+    '<div class="mapping-row"><span>Cliente</span><select id="map-v-cliente">'+optsVazio+'</select></div>'+
+    '<div class="mapping-row"><span>Data</span><select id="map-v-data">'+optsVazio+'</select></div>'+
+    '<div class="mapping-row"><span>Canal</span><select id="map-v-canal">'+optsVazio+'</select></div>'+
+    '<div class="mapping-row"><span>Forma de pagamento</span><select id="map-v-pagamento">'+optsVazio+'</select></div>'+
+    '<div class="mapping-row"><span>Tipo de entrega</span><select id="map-v-entrega">'+optsVazio+'</select></div>'+
+    '<div class="mapping-row"><span>Empresa (convênio)</span><select id="map-v-empresa">'+optsVazio+'</select></div>'+
+    '<div class="mapping-row"><span>Frete</span><select id="map-v-frete">'+optsVazio+'</select></div>'+
+    '<div class="form-row" style="max-width:620px;margin-top:10px;">'+
+    '<div><label>Data padrão (linhas sem data)</label><input type="date" id="input-v-data-base" value="'+todayStr()+'"></div>'+
+    '<div><label>Canal padrão (linhas sem canal)</label><select id="input-v-canal-base">'+opcoesComPlaceholder(CANAIS,'Selecione')+'</select></div>'+
+    '<div><label>Pagamento padrão (linhas sem forma de pagamento)</label><select id="input-v-pagamento-base">'+opcoesComPlaceholder(PAGAMENTOS,'Selecione')+'</select></div>'+
+    '<div><label>Entrega padrão (linhas sem tipo de entrega)</label><select id="input-v-entrega-base">'+opcoesComPlaceholder(TIPOS_ENTREGA,'Selecione')+'</select></div>'+
+    '</div>'+
+    '<div class="csv-preview"><table><thead><tr>'+csvVendasHeaders.map(h=>'<th>'+h+'</th>').join('')+'</tr></thead>'+
+    '<tbody>'+csvVendasRows.slice(0,3).map(r=>'<tr>'+csvVendasHeaders.map(h=>'<td>'+r[h]+'</td>').join('')+'</tr>').join('')+'</tbody></table></div>'+
+    '<button class="btn green" id="btn-importar-csv-vendas" style="margin-top:8px;">Importar '+csvVendasRows.length+' venda(s)</button>';
+  document.getElementById('map-v-categoria').value = guessHeaderPriority(csvVendasHeaders,[['categoria','produto']]);
+  document.getElementById('map-v-qtd').value = guessHeaderPriority(csvVendasHeaders,[['qtd','quantidade']]);
+  document.getElementById('map-v-valorunit').value = guessHeaderPriority(csvVendasHeaders,[['valor unit','valor.unit','unitário','unitario']]);
+  document.getElementById('map-v-valortotal').value = guessHeaderPriority(csvVendasHeaders,[['valor total','total']]);
+  document.getElementById('map-v-cliente').value = guessHeaderPriority(csvVendasHeaders,[['cliente','nome']]);
+  document.getElementById('map-v-data').value = guessHeaderPriority(csvVendasHeaders,[['data']]);
+  document.getElementById('map-v-canal').value = guessHeaderPriority(csvVendasHeaders,[['canal']]);
+  document.getElementById('map-v-pagamento').value = guessHeaderPriority(csvVendasHeaders,[['pagamento']]);
+  document.getElementById('map-v-entrega').value = guessHeaderPriority(csvVendasHeaders,[['entrega']]);
+  document.getElementById('map-v-empresa').value = guessHeaderPriority(csvVendasHeaders,[['empresa','convênio','convenio']]);
+  document.getElementById('map-v-frete').value = guessHeaderPriority(csvVendasHeaders,[['frete']]);
+  document.getElementById('btn-importar-csv-vendas').onclick = async ()=>{
+    const colCategoria = document.getElementById('map-v-categoria').value;
+    const colQtd = document.getElementById('map-v-qtd').value;
+    const colValorUnit = document.getElementById('map-v-valorunit').value;
+    const colValorTotal = document.getElementById('map-v-valortotal').value;
+    const colCliente = document.getElementById('map-v-cliente').value;
+    const colData = document.getElementById('map-v-data').value;
+    const colCanal = document.getElementById('map-v-canal').value;
+    const colPagamento = document.getElementById('map-v-pagamento').value;
+    const colEntrega = document.getElementById('map-v-entrega').value;
+    const colEmpresa = document.getElementById('map-v-empresa').value;
+    const colFrete = document.getElementById('map-v-frete').value;
+    const dataBase = document.getElementById('input-v-data-base').value || todayStr();
+    const canalBase = document.getElementById('input-v-canal-base').value || CANAIS[0];
+    const pagamentoBase = document.getElementById('input-v-pagamento-base').value || PAGAMENTOS[0];
+    const entregaBase = document.getElementById('input-v-entrega-base').value || TIPOS_ENTREGA[0];
+    if(!colCategoria){ alert('Selecione ao menos a coluna de categoria/produto.'); return; }
+    if(!confirm('Isso vai criar '+csvVendasRows.length+' venda(s) no sistema e ajustar o estoque de gás/água conforme necessário. Continuar?')) return;
+    let importadas = 0, ignoradas = 0;
+    csvVendasRows.forEach(function(r){
+      const textoCategoria = (r[colCategoria]||'').trim();
+      if(!textoCategoria){ ignoradas++; return; }
+      const chaveTexto = chaveNormalizada(textoCategoria);
+      const categoriaExistente = state.categoriasProdutos.find(c=>chaveNormalizada(c)===chaveTexto);
+      let categoria = categoriaExistente;
+      if(!categoria){
+        if(categoriaControladaEquivalente(textoCategoria)){
+          ignoradas++; return;
+        }
+        categoria = textoCategoria;
+        if(!state.categoriasProdutos.includes(categoria)) state.categoriasProdutos.push(categoria);
+      }
+      const controlada = isControlada(categoria);
+      const produto = controlada ? categoria : textoCategoria;
+      const quantidade = colQtd && r[colQtd] ? (Number(String(r[colQtd]).replace(',','.'))||1) : 1;
+      let valor_unit = colValorUnit && r[colValorUnit] ? Number(String(r[colValorUnit]).replace(/\./g,'').replace(',','.'))||0 : 0;
+      if(!valor_unit && colValorTotal && r[colValorTotal]){
+        const vt = Number(String(r[colValorTotal]).replace(/\./g,'').replace(',','.'))||0;
+        valor_unit = quantidade>0 ? Math.round((vt/quantidade)*100)/100 : vt;
+      }
+      const valor_total = Math.round(quantidade*valor_unit*100)/100;
+      const data = colData && r[colData] ? normalizarDataImportada(r[colData], dataBase) : dataBase;
+      const cliente = colCliente ? (r[colCliente]||'').trim() : '';
+      const canal = colCanal && r[colCanal] ? r[colCanal].trim() : canalBase;
+      const pagamento = colPagamento && r[colPagamento] ? r[colPagamento].trim() : pagamentoBase;
+      const tipo_entrega = colEntrega && r[colEntrega] ? r[colEntrega].trim() : entregaBase;
+      const empresa = colEmpresa ? (r[colEmpresa]||'').trim() : '';
+      const frete = (colFrete && r[colFrete] && TIPOS_ENTREGA_COM_FRETE.includes(tipo_entrega)) ? (Number(String(r[colFrete]).replace(',','.'))||0) : 0;
+      const venda = {
+        id: uid(), criadoEm: Date.now(), grupoId: uid(), fiado_pago:false,
+        data, cliente, canal, categoria, produto, quantidade, valor_unit, valor_total,
+        pagamento, nota:'Não lança', tipo_entrega, empresa, frete,
+        entrega_data:'', entrega_hora:'', entrega_status:'', obs:'Importado de planilha'
+      };
+      state.vendas.push(venda);
+      ajustaEstoquePorVenda(categoria, quantidade, false);
+      importadas++;
+    });
+    await save('vendas'); await save('estoque'); await save('categoriasProdutos');
+    csvVendasRows=null; csvVendasHeaders=null;
+    renderAll();
+    alert(importadas+' venda(s) importada(s) com sucesso!'+(ignoradas>0?' '+ignoradas+' linha(s) ignoradas (sem categoria, ou eram itens de gás/água não reconhecidos — confira o nome exato da categoria).':''));
+  };
+}
+function renderCsvDespesasMapping(){
+  const wrap = document.getElementById('csv-despesas-mapping');
+  const opts = csvDespesasHeaders.map(h=>'<option value="'+h+'">'+h+'</option>').join('');
+  const optsVazio = '<option value="">(nenhuma)</option>'+opts;
+  wrap.innerHTML = '<div class="hint" style="margin-top:14px;">'+csvDespesasRows.length+' linha(s) encontradas. Confirme qual coluna corresponde a cada campo:</div>'+
+    '<div class="mapping-row"><span>Valor <span class="req">*</span></span><select id="map-d-valor">'+opts+'</select></div>'+
+    '<div class="mapping-row"><span>Categoria</span><select id="map-d-categoria">'+optsVazio+'</select></div>'+
+    '<div class="mapping-row"><span>Data</span><select id="map-d-data">'+optsVazio+'</select></div>'+
+    '<div class="mapping-row"><span>Descrição</span><select id="map-d-descricao">'+optsVazio+'</select></div>'+
+    '<div class="form-row" style="max-width:420px;margin-top:10px;">'+
+    '<div><label>Data padrão (linhas sem data)</label><input type="date" id="input-d-data-base" value="'+todayStr()+'"></div>'+
+    '<div><label>Categoria padrão (linhas sem categoria)</label><select id="input-d-categoria-base">'+opcoesComPlaceholder(state.categoriasDespesas,'Selecione')+'</select></div>'+
+    '</div>'+
+    '<div class="csv-preview"><table><thead><tr>'+csvDespesasHeaders.map(h=>'<th>'+h+'</th>').join('')+'</tr></thead>'+
+    '<tbody>'+csvDespesasRows.slice(0,3).map(r=>'<tr>'+csvDespesasHeaders.map(h=>'<td>'+r[h]+'</td>').join('')+'</tr>').join('')+'</tbody></table></div>'+
+    '<button class="btn green" id="btn-importar-csv-despesas" style="margin-top:8px;">Importar '+csvDespesasRows.length+' despesa(s)</button>';
+  document.getElementById('map-d-valor').value = guessHeaderPriority(csvDespesasHeaders,[['valor']]);
+  document.getElementById('map-d-categoria').value = guessHeaderPriority(csvDespesasHeaders,[['categoria']]);
+  document.getElementById('map-d-data').value = guessHeaderPriority(csvDespesasHeaders,[['data']]);
+  document.getElementById('map-d-descricao').value = guessHeaderPriority(csvDespesasHeaders,[['descrição','descricao','observação','observacao','obs']]);
+  document.getElementById('btn-importar-csv-despesas').onclick = async ()=>{
+    const colValor = document.getElementById('map-d-valor').value;
+    const colCategoria = document.getElementById('map-d-categoria').value;
+    const colData = document.getElementById('map-d-data').value;
+    const colDescricao = document.getElementById('map-d-descricao').value;
+    const dataBase = document.getElementById('input-d-data-base').value || todayStr();
+    const categoriaBase = document.getElementById('input-d-categoria-base').value || state.categoriasDespesas[0];
+    if(!colValor){ alert('Selecione ao menos a coluna de valor.'); return; }
+    if(!confirm('Isso vai criar '+csvDespesasRows.length+' despesa(s) no sistema. Continuar?')) return;
+    let importadas = 0, ignoradas = 0;
+    csvDespesasRows.forEach(function(r){
+      const valorTxt = r[colValor];
+      const valor = Number(String(valorTxt||'0').replace(/\./g,'').replace(',','.'))||0;
+      if(!valor || valor<=0){ ignoradas++; return; }
+      const categoriaTxt = colCategoria && r[colCategoria] ? r[colCategoria].trim() : '';
+      const categoriaExistente = state.categoriasDespesas.find(c=>chaveNormalizada(c)===chaveNormalizada(categoriaTxt));
+      const categoria = categoriaExistente || categoriaTxt || categoriaBase;
+      if(categoriaTxt && !categoriaExistente && !state.categoriasDespesas.includes(categoria)) state.categoriasDespesas.push(categoria);
+      const data = colData && r[colData] ? normalizarDataImportada(r[colData], dataBase) : dataBase;
+      const descricao = colDescricao ? (r[colDescricao]||'').trim() : '';
+      state.despesas.push({id:uid(), criadoEm:Date.now(), data, categoria, valor, descricao: descricao || 'Importado de planilha'});
+      importadas++;
+    });
+    await save('despesas'); await save('categoriasDespesas');
+    csvDespesasRows=null; csvDespesasHeaders=null;
+    renderAll();
+    alert(importadas+' despesa(s) importada(s) com sucesso!'+(ignoradas>0?' '+ignoradas+' linha(s) ignoradas por falta de valor.':''));
   };
 }
 function renderCsvMapping(){
